@@ -43,8 +43,7 @@ SECTIONS
         *(.bss .bss.*)
         *(COMMON)
     }
-      
-    /* 丢弃不需要的节区 */
+
     /DISCARD/ : {
         *(.comment)
         *(.note.GNU-stack)

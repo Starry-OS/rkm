@@ -1,6 +1,10 @@
+use std::collections::BTreeMap;
+
 use goblin::elf::Elf;
 
-use crate::arch::RelocationType;
+use crate::arch::{
+    Aarch64RelocationType, Loongarch64RelocationType, Riscv64RelocationType, X86_64RelocationType,
+};
 
 pub struct ElfParser<'a> {
     elf: Elf<'a>,
@@ -73,11 +77,13 @@ impl<'a> ElfParser<'a> {
                     .get_at(section.sh_name)
                     .unwrap_or("<unknown>");
                 println!("\nSection: {} (Type: RELA)", section_name);
-                println!(
-                    "{:<16} {:<35} {:<30} {:<16}",
-                    "Offset", "Type", "Symbol", "Addend"
-                );
-                println!("{}", "-".repeat(100));
+                // println!(
+                //     "{:<16} {:<35} {:<30} {:<16}",
+                //     "Offset", "Type", "Symbol", "Addend"
+                // );
+                // println!("{}", "-".repeat(100));
+                println!("{:<35} : Count", "Relocation Type");
+                println!("{}", "-".repeat(50));
                 self.parse_and_print_rela_relocs(section);
             }
         }
@@ -102,25 +108,58 @@ impl<'a> ElfParser<'a> {
             goblin::elf64::reloc::from_raw_rela(data_buf.as_ptr() as _, section.sh_size as usize)
         };
 
+        let mut rela_ty_list = BTreeMap::<String, usize>::new();
+
+        let mut example = None;
         for rela in rela_list {
             let rel_offset = rela.r_offset;
             let r_info = rela.r_info;
             let addend = rela.r_addend;
-
             let rel_type = (r_info & 0xffffffff) as u32;
             let sym_idx = (r_info >> 32) as usize;
 
-            let rel_type = RelocationType::try_from(rel_type)
-                .map(|ty| format!("{ty:?}"))
-                .unwrap_or_else(|_| format!("Unknown({})", rel_type));
-
+            let rel_type = self.get_rel_type(rel_type);
             let sym_name = self.get_symbol_name(sym_idx).unwrap_or("unknow");
+            
+            if example.is_none() {
+                let fmt = format!(
+                    "0x{:<14x} {:<35} {:<30} 0x{:x}",
+                    rel_offset, rel_type, sym_name, addend
+                );
+                example = Some(fmt);
+            }
 
-            println!(
-                "0x{:<14x} {:<35} {:<30} 0x{:x}",
-                rel_offset, rel_type, sym_name, addend
-            );
+            rela_ty_list.entry(rel_type.clone()).or_insert_with(|| 0);
+            *rela_ty_list.get_mut(&rel_type).unwrap() += 1;
         }
+        for (rel_type, count) in rela_ty_list {
+            println!("{:<35} : {}", rel_type, count);
+        }
+
+        if let Some(example) = example {
+            println!("\nExample Relocation Entry Format:");
+            println!(
+                "{:<16} {:<35} {:<30} {:<16}",
+                "Offset", "Type", "Symbol", "Addend"
+            );
+            println!("{}", example);
+        }
+    }
+
+    fn get_rel_type(&self, rel_type: u32) -> String {
+        let ty = match self.get_machine_type() {
+            "x86-64" => X86_64RelocationType::try_from(rel_type).map(|ty| format!("{ty:?}")),
+            "RISC-V" => Riscv64RelocationType::try_from(rel_type).map(|ty| format!("{ty:?}")),
+            "LoongArch" => {
+                Loongarch64RelocationType::try_from(rel_type).map(|ty| format!("{ty:?}"))
+            }
+            "AArch64" => Aarch64RelocationType::try_from(rel_type).map(|ty| format!("{ty:?}")),
+            ty => unimplemented!(
+                "Relocation type parsing not implemented for machine type: {}",
+                ty
+            ),
+        };
+        ty.unwrap_or_else(|_| format!("Unknown({})", rel_type))
     }
 
     fn get_elf_type(&self) -> &'static str {
@@ -150,11 +189,10 @@ impl<'a> ElfParser<'a> {
 
     fn get_machine_type(&self) -> &'static str {
         match self.elf.header.e_machine {
-            goblin::elf::header::EM_386 => "Intel 80386",
             goblin::elf::header::EM_X86_64 => "x86-64",
-            goblin::elf::header::EM_ARM => "ARM",
             goblin::elf::header::EM_AARCH64 => "AArch64",
-            goblin::elf::header::EM_PPC => "PowerPC",
+            goblin::elf::header::EM_RISCV => "RISC-V",
+            goblin::elf::header::EM_LOONGARCH => "LoongArch",
             _ => "unknown",
         }
     }

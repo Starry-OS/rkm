@@ -10,7 +10,14 @@ goblin = { version = "0.10", default-features = false, features = [
     "endian_fd",
 ] }
 int-enum = "1.2.0"
+bitflags = "2.10"
+log = "0.4"
+rustc-demangle = { version = "0.1.26", default-features = false }
 
 [[example]]
 name = "parse_elf"
 path = "examples/parse_elf.rs"
+
+
+[dev-dependencies]
+env_logger = "0.11"
