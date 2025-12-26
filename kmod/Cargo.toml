@@ -9,3 +9,4 @@ name = "kmod"
 
 [dependencies]
 kmacro = { path = "../kmacro" }
+kbindings = { path = "../kbindings" }

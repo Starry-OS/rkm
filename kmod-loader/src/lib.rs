@@ -2,7 +2,9 @@
 
 mod arch;
 pub mod loader;
+mod module;
 mod parser;
+
 use alloc::string::String;
 pub use parser::ElfParser;
 extern crate alloc;

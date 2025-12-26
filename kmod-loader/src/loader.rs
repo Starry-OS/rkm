@@ -1,4 +1,4 @@
-use crate::{ModuleErr, Result};
+use crate::{ModuleErr, Result, module::ModuleInfo};
 
 use alloc::{
     boxed::Box,
@@ -7,9 +7,9 @@ use alloc::{
     vec::Vec,
 };
 use bitflags::bitflags;
-use core::fmt::Display;
+use core::{ffi::CStr, fmt::Display};
 use goblin::elf::{Elf, SectionHeader};
-use kmod::ModuleInfo;
+use kmod::Module;
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,19 +90,21 @@ struct SectionPages {
 pub struct ModuleOwner<H: KernelModuleHelper> {
     module_info: ModuleInfo,
     pages: Vec<SectionPages>,
+    name: String,
+    module: Module,
     _helper: core::marker::PhantomData<H>,
 }
 
 impl<H: KernelModuleHelper> ModuleOwner<H> {
     /// Get the name of the module
     pub fn name(&self) -> &str {
-        self.module_info.name()
+        &self.name
     }
 
     /// Call the module's init function
     pub fn call_init(&mut self) -> Result<i32> {
-        if let Some(init_fn) = self.module_info.init_fn.take() {
-            let result = init_fn();
+        if let Some(init_fn) = self.module.take_init_fn() {
+            let result = unsafe { init_fn() };
             Ok(result)
         } else {
             log::warn!("The init function can only be called once.");
@@ -112,8 +114,10 @@ impl<H: KernelModuleHelper> ModuleOwner<H> {
 
     /// Call the module's exit function
     pub fn call_exit(&mut self) {
-        if let Some(exit_fn) = self.module_info.exit_fn.take() {
-            exit_fn();
+        if let Some(exit_fn) = self.module.take_exit_fn() {
+            unsafe {
+                exit_fn();
+            }
         } else {
             log::warn!("The exit function can only be called once.");
         }
@@ -151,6 +155,7 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
     /// Load the module into kernel space
     pub fn load_module(mut self) -> Result<ModuleOwner<H>> {
         let mut owner = self.pre_read_modinfo()?;
+        log::error!("Module({}) info: {:?}", owner.name(), owner.module_info);
         self.layout_and_allocate(&mut owner)?;
         let load_info = self.simplify_symbols()?;
         self.apply_relocations(load_info, &owner)?;
@@ -159,15 +164,11 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
 
         self.set_section_perms(&mut owner)?;
 
-        log::error!(
-            "Module({}) loaded successfully, info: {:?}",
-            owner.name(),
-            owner.module_info
-        );
+        log::error!("Module({}) loaded successfully!", owner.name(),);
         Ok(owner)
     }
 
-    fn find_modinfo_section(&self) -> Result<&SectionHeader> {
+    fn find_section(&self, name: &str) -> Result<&SectionHeader> {
         for shdr in &self.elf.section_headers {
             let sec_name = self
                 .elf
@@ -175,44 +176,72 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
                 .get_at(shdr.sh_name)
                 .ok_or(ModuleErr::InvalidElf)?;
 
-            if sec_name == ".modinfo" {
+            if sec_name == name {
                 return Ok(shdr);
             }
         }
+        log::error!("Section '{}' not found", name);
         Err(ModuleErr::InvalidElf)
     }
 
     fn pre_read_modinfo(&self) -> Result<ModuleOwner<H>> {
-        let modinfo_shdr = self.find_modinfo_section()?;
+        let modinfo_shdr = self.find_section(".modinfo")?;
         let file_offset = modinfo_shdr.sh_offset as usize;
         let size = modinfo_shdr.sh_size as usize;
 
-        if size != core::mem::size_of::<ModuleInfo>() {
-            return Err(ModuleErr::InvalidElf);
+        let mut modinfo_data = &self.elf_data[file_offset..file_offset + size];
+        let mut module_info = ModuleInfo::new();
+
+        log::info!("Reading .modinfo section (size: {:#x})", size);
+
+        // read the modinfo data
+        // format is key=value\0key=value\0...
+        loop {
+            if modinfo_data.is_empty() {
+                break;
+            }
+            let cstr = CStr::from_bytes_until_nul(modinfo_data)
+                .map_err(|_| ModuleErr::InvalidElf)
+                .unwrap();
+            let str_slice = cstr.to_str().map_err(|_| ModuleErr::InvalidElf)?;
+            modinfo_data = &modinfo_data[cstr.to_bytes_with_nul().len()..];
+
+            let mut split = str_slice.splitn(2, '=');
+            let key = split.next().ok_or(ModuleErr::InvalidElf)?.to_string();
+            let value = split.next().ok_or(ModuleErr::InvalidElf)?.to_string();
+            module_info.add_kv(key, value);
         }
 
-        let modinfo_data = &self.elf_data[file_offset..file_offset + size];
-        let module_info: ModuleInfo =
-            unsafe { core::ptr::read(modinfo_data.as_ptr() as *const ModuleInfo) };
+        let name = module_info
+            .get("name")
+            .ok_or(ModuleErr::InvalidElf)?
+            .to_string();
 
         Ok(ModuleOwner {
+            name,
             module_info,
             pages: Vec::new(),
+            module: Module::default(),
             _helper: core::marker::PhantomData,
         })
     }
 
     fn post_read_modinfo(&mut self, owner: &mut ModuleOwner<H>) -> Result<()> {
-        let modinfo_shdr = self.find_modinfo_section()?;
+        let modinfo_shdr = self.find_section(".gnu.linkonce.this_module")?;
         let size = modinfo_shdr.sh_size as usize;
 
-        if size != core::mem::size_of::<ModuleInfo>() {
+        if size != core::mem::size_of::<Module>() {
+            log::error!(
+                "Invalid .gnu.linkonce.this_module section size: {}, expected: {}",
+                size,
+                core::mem::size_of::<Module>()
+            );
             return Err(ModuleErr::InvalidElf);
         }
         // the data address is the allocated virtual address and it has been relocated
         let modinfo_data = modinfo_shdr.sh_addr as *mut u8;
-        let module_info = unsafe { core::ptr::read(modinfo_data as *const ModuleInfo) };
-        owner.module_info = module_info;
+        let module = unsafe { core::ptr::read(modinfo_data as *const Module) };
+        owner.module = module;
         Ok(())
     }
 

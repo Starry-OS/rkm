@@ -44,7 +44,9 @@ typedef struct {
 ## 特殊问题
 - 在la64架构上，如果没有设置code-model,可能会产生特殊的重定位项。比如其默认使用的medium code-model,会导致生成R_LARCH_CALL36重定位类型,这在内核模块加载时是不被支持的。因此，需要在编译时指定`-C code-model=large`来避免这种情况的发生。
 - --gc-sections 链接选项可以移除未使用的节，从而减少模块大小与重定位数量
-  
+- linux的lkm 会产生`.__mcount_locs`节, 该节用于支持内核的函数调用跟踪功能。如果模块不使用该功能, 可以通过`ccflags-remove-y := -pg`来避免生成该节。
+- linux的lkm 会产生`.__patchable_function_entries`节, 这个功能与`.__mcount_locs`类似, 可以通过`ccflags-remove-y := -fpatchable-function-entry=%`来避免生成该节。
+- linux的lkm 会产生`.return_sites`节, 记录了“每个函数里 return 指令的位置”，用于运行时动态打补丁，实现函数返回路径的跟踪与修改。
   
 ### x86_64架构下的内核模块重定位问题:
 

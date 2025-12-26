@@ -1,6 +1,6 @@
 #![no_std]
 
-use kmod::{declare_module, exit_fn, init_fn};
+use kmod::{exit_fn, init_fn, module};
 
 unsafe extern "C" {
     fn write_char(c: u8);
@@ -30,4 +30,9 @@ fn hello_exit() {
     core::fmt::write(&mut writer, format_args!("Goodbye, Kernel Module!\n")).unwrap();
 }
 
-declare_module!("hello", "1.0.0", hello_init, hello_exit);
+module!(
+    name: "hello",
+    license: "GPL",
+    description: "A simple hello world kernel module",
+    version: "0.1.0",
+);

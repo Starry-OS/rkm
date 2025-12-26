@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let loader = ModuleLoader::<FakeHelper>::new(&data_box)?;
-    let owner = loader.load_module()?;
+    let owner = loader.load_module().unwrap();
     drop(owner);
     Ok(())
 }
