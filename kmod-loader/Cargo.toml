@@ -14,7 +14,7 @@ bitflags = "2.10"
 log = "0.4"
 rustc-demangle = { version = "0.1.26", default-features = false }
 kmod = { path = "../kmod" }
-bitfield-struct = "0.11"
+bitfield-struct = "0.12"
 
 
 [features]
@@ -24,6 +24,9 @@ module-sections = []
 name = "parse_elf"
 path = "examples/parse_elf.rs"
 
+[[example]]
+name = "loader"
+path = "examples/loader.rs"
 
 [dev-dependencies]
 env_logger = "0.11"

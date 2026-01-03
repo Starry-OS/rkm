@@ -116,7 +116,7 @@ impl X86_64RelocationType {
             // Write the relocated value
             match size {
                 4 => location.write::<u32>(target_addr as u32),
-                8 => location.write::<u64>(target_addr as u64),
+                8 => location.write::<u64>(target_addr),
                 _ => unreachable!(),
             }
         }

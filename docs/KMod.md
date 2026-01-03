@@ -40,6 +40,14 @@ typedef struct {
   - 如果是绝对符号（SHN_ABS），则为绝对地址
 - `st_size` - 符号的大小（以字节为单位）用于调试、统计等目的
 
+## LKM 兼容性
+尽管LKM（Loadable Kernel Module）使得内核功能变得灵活和可扩展，但是LKM并不是二进制兼容的，甚至在API上也不保证兼容性，这导致不同内核版本之间LKM需要重新编译。为了实现加载LKM的目标，需要确定以下几点：
+- 内核版本：不同的内核版本可能有不同的内核API和数据结构定义
+- 架构：不同的CPU架构（如x86_64, arm64, riscv64等）可能具有架构相关的定义
+- 内核配置选择：内核配置选项（如启用或禁用某些功能）可能影响内核数据结构和API
+
+在确定了这三点后，就可以明确LKM的编译环境，进而在kmod库中添加相关的数据结构定义，从而实现LKM的正确加载和运行。
+
 
 ## 特殊问题
 - 在la64架构上，如果没有设置code-model,可能会产生特殊的重定位项。比如其默认使用的medium code-model,会导致生成R_LARCH_CALL36重定位类型,这在内核模块加载时是不被支持的。因此，需要在编译时指定`-C code-model=large`来避免这种情况的发生。
@@ -54,6 +62,38 @@ typedef struct {
 
 目前，Starry的基座Arceos的内核地址空间起始地址位于`0xffff_8000_0020_0000`，其布局与Linux具有较大的差别。Linux内核在编译内核模块时会选用`code-model=kernel`，这与其地址空间布局密切相关。因此无法当前无法直接使用该code-model来编译内核模块。为了解决这个问题，目前的做法是使用`code-model=large`来编译内核模块，这样可以避免生成一些跟地址空间布局相关的重定位项，从而避免上述问题的发生。
 
+
+### Linux数据结构
+
+可以通过以下命令确定内核某些头文件中的数据结构定义（源码目录下）：
+```sh
+gcc -E \
+  -Iinclude \
+  -Iinclude/generated \
+  -Iarch/$(ARCH)/include \
+  -Iarch/$(ARCH)/include/generated \
+  -include include/linux/kconfig.h \
+  -include include/generated/autoconf.h \
+  target.h > target.i
+```
+
+在发行版的内核头文件中，可以使用类似如下的命令来预处理内核模块相关的数据结构定义，例如`module.h`:
+```sh
+COMMON=/usr/src/linux-headers-6.17.13+deb14-common
+ARCH=/usr/src/linux-headers-6.17.13+deb14-riscv64
+KDIR=/lib/modules/6.17.13+deb14-riscv64/build
+
+gcc -E \
+    -I$COMMON/include \
+    -I$COMMON/include/generated \
+    -I$COMMON/arch/riscv/include \
+    -I$ARCH/arch/riscv/include \
+    -I$ARCH/arch/riscv/include/generated \
+    -I$ARCH/include \
+    -include $COMMON/include/linux/kconfig.h \
+    -include $KDIR/include/generated/autoconf.h \
+    $COMMON/include/linux/module.h > module.i
+```
 
 ##  参考链接
 - riscv64架构对plt/got的处理: https://elixir.bootlin.com/linux/v6.6/source/arch/riscv/kernel/module-sections.c#L90

@@ -1,6 +1,17 @@
 #![no_std]
 #![allow(warnings)]
 
+mod aarch64;
+mod riscv64;
+mod x86_64;
+
+#[cfg(target_arch = "aarch64")]
+pub use aarch64::mod_arch_specific;
+#[cfg(target_arch = "riscv64")]
+pub use riscv64::mod_arch_specific;
+#[cfg(target_arch = "x86_64")]
+pub use x86_64::mod_arch_specific;
+
 pub type __s8 = core::ffi::c_schar;
 pub type __u8 = core::ffi::c_uchar;
 pub type __s16 = core::ffi::c_short;
@@ -301,10 +312,6 @@ impl Default for module_memory {
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
-pub struct mod_arch_specific {}
-
-#[repr(C)]
-#[derive(Debug, Default, Copy, Clone)]
 pub struct bug_entry {
     pub bug_addr_disp: core::ffi::c_int,
     pub file_disp: core::ffi::c_int,
@@ -444,74 +451,109 @@ pub struct module {
     pub state: module_state,
     pub list: list_head,
     pub name: [core::ffi::c_char; 56usize],
+
     pub mkobj: module_kobject,
     pub modinfo_attrs: *mut module_attribute,
     pub version: *const core::ffi::c_char,
     pub srcversion: *const core::ffi::c_char,
     pub holders_dir: *mut kobject,
+
     pub syms: *mut kernel_symbol,
     pub crcs: *const s32,
     pub num_syms: core::ffi::c_uint,
+
     pub param_lock: mutex,
+
     pub kp: *mut kernel_param,
     pub num_kp: core::ffi::c_uint,
+
     pub num_gpl_syms: core::ffi::c_uint,
     pub gpl_syms: *const kernel_symbol,
     pub gpl_crcs: *const s32,
     pub using_gplonly_symbols: bool_,
+
+    // CONFIG_MODULE_SIG
     pub sig_ok: bool_,
+
     pub async_probe_requested: bool_,
+
     pub num_exentries: core::ffi::c_uint,
     pub extable: *mut exception_table_entry,
+
     pub init: ::core::option::Option<unsafe extern "C" fn() -> core::ffi::c_int>,
+
     pub mem: [module_memory; 7usize],
+
     pub arch: mod_arch_specific,
     pub taints: core::ffi::c_ulong,
+
     pub num_bugs: core::ffi::c_uint,
     pub bug_list: list_head,
     pub bug_table: *mut bug_entry,
+
     pub kallsyms: *mut mod_kallsyms,
     pub core_kallsyms: mod_kallsyms,
+
     pub sect_attrs: *mut module_sect_attrs,
     pub notes_attrs: *mut module_notes_attrs,
+
     pub args: *mut core::ffi::c_char,
+
     pub percpu: *mut core::ffi::c_void,
     pub percpu_size: core::ffi::c_uint,
+
     pub noinstr_text_start: *mut core::ffi::c_void,
     pub noinstr_text_size: core::ffi::c_uint,
+
     pub num_tracepoints: core::ffi::c_uint,
     pub tracepoints_ptrs: *const core::ffi::c_int,
+
     pub num_srcu_structs: core::ffi::c_uint,
     pub srcu_struct_ptrs: *mut *mut srcu_struct,
+
     pub num_bpf_raw_events: core::ffi::c_uint,
     pub bpf_raw_events: *mut bpf_raw_event_map,
+
     pub btf_data_size: core::ffi::c_uint,
+    pub btf_base_data_size: core::ffi::c_uint,
     pub btf_data: *mut core::ffi::c_void,
+    pub btf_base_data: *mut core::ffi::c_void,
+
     pub jump_entries: *mut jump_entry,
     pub num_jump_entries: core::ffi::c_uint,
+
     pub num_trace_bprintk_fmt: core::ffi::c_uint,
     pub trace_bprintk_fmt_start: *mut *const core::ffi::c_char,
+
     pub trace_events: *mut *mut trace_event_call,
     pub num_trace_events: core::ffi::c_uint,
     pub trace_evals: *mut *mut trace_eval_map,
     pub num_trace_evals: core::ffi::c_uint,
+
     pub num_ftrace_callsites: core::ffi::c_uint,
     pub ftrace_callsites: *mut core::ffi::c_ulong,
+
     pub kprobes_text_start: *mut core::ffi::c_void,
     pub kprobes_text_size: core::ffi::c_uint,
     pub kprobe_blacklist: *mut core::ffi::c_ulong,
     pub num_kprobe_blacklist: core::ffi::c_uint,
-    pub num_static_call_sites: core::ffi::c_int,
-    pub static_call_sites: *mut static_call_site,
-    pub klp: bool_,
-    pub klp_alive: bool_,
-    pub klp_info: *mut klp_modinfo,
+
+    // CONFIG_HAVE_STATIC_CALL_INLINE
+    // pub num_static_call_sites: core::ffi::c_int,
+    // pub static_call_sites: *mut static_call_site,
+
+    // CONFIG_LIVEPATCH
+    // pub klp: bool_,
+    // pub klp_alive: bool_,
+    // pub klp_info: *mut klp_modinfo,
     pub source_list: list_head,
     pub target_list: list_head,
+
     pub exit: ::core::option::Option<unsafe extern "C" fn()>,
     pub refcnt: atomic_t,
-    pub ctors: *mut ctor_fn_t,
-    pub num_ctors: core::ffi::c_uint,
+    // CONFIG_CONSTRUCTORS: disabled for most configurations
+    // pub ctors: *mut ctor_fn_t,
+    // pub num_ctors: core::ffi::c_uint,
     pub dyndbg_info: _ddebug_info,
 }
 

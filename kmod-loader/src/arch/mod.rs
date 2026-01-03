@@ -3,10 +3,14 @@ mod loongarch64;
 mod riscv64;
 mod x86_64;
 
-pub use aarch64::{Aarch64ArchRelocate, Aarch64RelocationType};
-pub use loongarch64::{Loongarch64ArchRelocate, Loongarch64RelocationType};
-pub use riscv64::{Riscv64ArchRelocate, Riscv64RelocationType};
-pub use x86_64::{X86_64ArchRelocate, X86_64RelocationType};
+pub(crate) use aarch64::Aarch64ArchRelocate;
+pub use aarch64::Aarch64RelocationType;
+pub(crate) use loongarch64::Loongarch64ArchRelocate;
+pub use loongarch64::Loongarch64RelocationType;
+pub(crate) use riscv64::Riscv64ArchRelocate;
+pub use riscv64::Riscv64RelocationType;
+pub(crate) use x86_64::X86_64ArchRelocate;
+pub use x86_64::X86_64RelocationType;
 
 /// Extracts the relocation type from the r_info field of an Elf64_Rela
 const fn get_rela_type(r_info: u64) -> u32 {

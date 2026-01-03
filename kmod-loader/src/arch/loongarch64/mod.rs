@@ -221,7 +221,7 @@ impl Loongarch64RelocationType {
         }
         let instruction = location.read::<u32>();
 
-        offset = offset >> 2;
+        offset >>= 2;
 
         let mut inst = reg0i26_format::from_bits(instruction);
 
@@ -323,7 +323,7 @@ impl Loongarch64RelocationType {
             }
             _ => unreachable!(),
         };
-        return new_ty.apply_r_larch_pcala(location, got, rela_stack_top, rela_stack);
+        new_ty.apply_r_larch_pcala(location, got, rela_stack_top, rela_stack)
     }
 
     /// See <https://elixir.bootlin.com/linux/v6.6/source/arch/loongarch/kernel/module.c#L104>
@@ -343,7 +343,7 @@ impl Loongarch64RelocationType {
             );
             address = module_emit_plt_entry();
         }
-        return self.apply_r_larch_sop_push_pcrel(location, address, rela_stack_top, rela_stack);
+        self.apply_r_larch_sop_push_pcrel(location, address, rela_stack_top, rela_stack)
     }
 
     /// See <https://elixir.bootlin.com/linux/v6.6/source/arch/loongarch/kernel/module.c#L73>
@@ -564,10 +564,10 @@ impl Loongarch64RelocationType {
             }
             _ => {
                 log::error!("Relocation type {:?} not implemented yet", self);
-                return Err(ModuleErr::RelocationFailed(format!(
+                Err(ModuleErr::RelocationFailed(format!(
                     "Relocation type {:?} not implemented yet",
                     self
-                )));
+                )))
             }
         }
     }
@@ -582,7 +582,7 @@ impl Loongarch64RelocationType {
     }
 
     fn apply_r_larch_64(&self, location: Ptr, address: u64) -> Result<()> {
-        location.write::<u64>(address as u64);
+        location.write::<u64>(address);
         Ok(())
     }
 
@@ -711,7 +711,7 @@ impl Loongarch64ArchRelocate {
             );
             let res = reloc_type.apply_relocation(
                 location,
-                target_addr as u64,
+                target_addr,
                 &mut rela_stack_top,
                 &mut rela_stack,
             );

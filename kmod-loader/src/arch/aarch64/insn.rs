@@ -1,7 +1,7 @@
 use crate::{BIT, ModuleErr, Result};
 use alloc::format;
 
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, unused)]
 #[derive(Debug, Clone, Copy)]
 pub enum Aarch64RelocOp {
     RELOC_OP_NONE,
@@ -17,7 +17,7 @@ pub enum Aarch64InsnMovwImmType {
     AARCH64_INSN_IMM_MOVKZ,
 }
 
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, unused)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Aarch64InsnImmType {
     AARCH64_INSN_IMM_ADR,

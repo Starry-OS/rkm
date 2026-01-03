@@ -29,6 +29,14 @@ impl Module {
         Module(module)
     }
 
+    pub fn init_fn(&self) -> Option<unsafe extern "C" fn() -> core::ffi::c_int> {
+        self.0.init
+    }
+
+    pub fn exit_fn(&self) -> Option<unsafe extern "C" fn()> {
+        self.0.exit
+    }
+
     pub fn take_init_fn(&mut self) -> Option<unsafe extern "C" fn() -> core::ffi::c_int> {
         let init_fn = self.0.init.take();
         init_fn

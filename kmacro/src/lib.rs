@@ -49,6 +49,24 @@ pub fn exit_fn(_attr: TokenStream, item: TokenStream) -> TokenStream {
     .into()
 }
 
+/// Attribute macro to mark a C API function. It places the function in the
+/// `.c.text` section and applies `no_mangle`.
+/// # Example:
+/// ```ignore
+/// #[capi_fn]
+/// unsafe extern "C" fn my_capi_function(arg: i32) -> i32 { ... }
+/// ```
+#[proc_macro_attribute]
+pub fn capi_fn(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let func = parse_macro_input!(item as syn::ItemFn);
+    quote! {
+        #[unsafe(no_mangle)]
+        #[unsafe(link_section = ".c.text")]
+        #func
+    }
+    .into()
+}
+
 struct ModuleArgs {
     name: Option<LitStr>,
     version: Option<LitStr>,

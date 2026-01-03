@@ -190,7 +190,7 @@ impl Aarch64RelocationType {
         let mut s_addr = do_reloc(op, location, address) as i64;
         s_addr >>= lsb;
         // Extract the value bits and shift them to bit 0.
-        let imm_mask = ((BIT_U64!(lsb + len) - 1) >> lsb) as u64;
+        let imm_mask = (BIT_U64!(lsb + len) - 1) >> lsb;
         let imm = (s_addr as u64) & imm_mask;
 
         // Update the instruction's immediate field.
@@ -244,9 +244,9 @@ impl Aarch64RelocationType {
             Ok(false)
         } else {
             //  out of range for ADR -> emit a veneer
-            return Err(ModuleErr::RelocationFailed(
+            Err(ModuleErr::RelocationFailed(
                 "ADR out of range for veneer emission".to_string(),
-            ));
+            ))
         }
     }
 

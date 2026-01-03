@@ -115,6 +115,7 @@ impl<H: KernelModuleHelper> ModuleOwner<H> {
     /// Call the module's exit function
     pub fn call_exit(&mut self) {
         if let Some(exit_fn) = self.module.take_exit_fn() {
+            log::warn!("Calling module exit function...");
             unsafe {
                 exit_fn();
             }
@@ -132,7 +133,14 @@ const fn align_up(addr: usize, align: usize) -> usize {
 //     addr & !(align - 1)
 // }
 
-pub struct ModuleLoadInfo {
+const SKIP_SECTIONS: &[&str] = &[
+    ".note.gnu.build-id",
+    ".modinfo",
+    ".note.Linux",
+    ".note.gnu.property",
+];
+
+pub(crate) struct ModuleLoadInfo {
     pub(crate) syms: Vec<(goblin::elf::sym::Sym, String)>,
 }
 
@@ -154,6 +162,9 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
 
     /// Load the module into kernel space
     pub fn load_module(mut self) -> Result<ModuleOwner<H>> {
+        // let arch = offset_of!(kmod::kbindings::module, arch);
+        // log::error!("Offset of module.arch: {}", arch);
+
         let mut owner = self.pre_read_modinfo()?;
         log::error!("Module({}) info: {:?}", owner.name(), owner.module_info);
         self.layout_and_allocate(&mut owner)?;
@@ -241,6 +252,16 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
         // the data address is the allocated virtual address and it has been relocated
         let modinfo_data = modinfo_shdr.sh_addr as *mut u8;
         let module = unsafe { core::ptr::read(modinfo_data as *const Module) };
+
+        let init_fn = module.init_fn();
+        let exit_fn = module.exit_fn();
+
+        log::error!(
+            "Module init_fn: {:?}, exit_fn: {:?}",
+            init_fn.map(|f| f as *const ()),
+            exit_fn.map(|f| f as *const ())
+        );
+
         owner.module = module;
         Ok(())
     }
@@ -272,6 +293,13 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
 
             // Skip non-allocatable sections
             if (shdr.sh_flags & goblin::elf::section_header::SHF_ALLOC as u64) == 0 {
+                log::debug!("Skipping non-allocatable section '{}'", sec_name);
+                continue;
+            }
+
+            // Skip sections in the skip list
+            if SKIP_SECTIONS.contains(&sec_name) {
+                log::error!("Skipping section '{}' in skip list", sec_name);
                 continue;
             }
 
@@ -320,7 +348,7 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
 
         for page in &owner.pages {
             log::error!(
-                "Allocated section '{:>16}' at {:p} [{}] ({:8<#x})",
+                "Allocated section '{:>26}' at {:p} [{}] ({:8<#x})",
                 page.name,
                 page.addr.as_ptr(),
                 page.perms,
@@ -441,7 +469,7 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
 
     /// See <https://elixir.bootlin.com/linux/v6.6/source/kernel/module/main.c#L1438>
     fn apply_relocations(&self, load_info: ModuleLoadInfo, owner: &ModuleOwner<H>) -> Result<()> {
-        for (_, shdr) in self.elf.section_headers.iter().enumerate() {
+        for shdr in self.elf.section_headers.iter() {
             let infosec = shdr.sh_info;
 
             let sec_name = self
@@ -494,7 +522,7 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
             match self.elf.header.e_machine {
                 goblin::elf::header::EM_RISCV => {
                     crate::arch::Riscv64ArchRelocate::apply_relocate_add(
-                        &rela_list,
+                        rela_list,
                         shdr,
                         &self.elf.section_headers,
                         &load_info,
@@ -503,7 +531,7 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
                 }
                 goblin::elf::header::EM_LOONGARCH => {
                     crate::arch::Loongarch64ArchRelocate::apply_relocate_add(
-                        &rela_list,
+                        rela_list,
                         shdr,
                         &self.elf.section_headers,
                         &load_info,
@@ -512,7 +540,7 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
                 }
                 goblin::elf::header::EM_AARCH64 => {
                     crate::arch::Aarch64ArchRelocate::apply_relocate_add(
-                        &rela_list,
+                        rela_list,
                         shdr,
                         &self.elf.section_headers,
                         &load_info,
@@ -521,7 +549,7 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
                 }
                 goblin::elf::header::EM_X86_64 => {
                     crate::arch::X86_64ArchRelocate::apply_relocate_add(
-                        &rela_list,
+                        rela_list,
                         shdr,
                         &self.elf.section_headers,
                         &load_info,

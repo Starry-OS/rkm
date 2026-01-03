@@ -1,12 +1,11 @@
 #![no_std]
 
-mod arch;
-pub mod loader;
+pub mod arch;
+mod loader;
 mod module;
-mod parser;
 
 use alloc::string::String;
-pub use parser::ElfParser;
+pub use loader::{KernelModuleHelper, ModuleLoader, ModuleOwner, SectionMemOps, SectionPerm};
 extern crate alloc;
 
 type Result<T> = core::result::Result<T, ModuleErr>;
