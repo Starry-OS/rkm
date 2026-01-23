@@ -1,0 +1,10 @@
+[package]
+name = "kapi"
+version = "0.1.0"
+edition = "2024"
+description = "Kernel API definitions for kmod-loader"
+
+[dependencies]
+kmod = { path = "../kmod" }
+axerrno = "0.2"
+paste = "1.0"

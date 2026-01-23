@@ -69,4 +69,3 @@ impl KernelParam {
         unsafe { self.0.ops.as_ref().unwrap() }
     }
 }
-
