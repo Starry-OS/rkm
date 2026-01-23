@@ -70,11 +70,3 @@ impl KernelParam {
     }
 }
 
-/// Flags available for kernel_param_ops
-#[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(non_camel_case_types)]
-pub enum ParamOpsFlags {
-    /// NOARG - the parameter allows for no argument (foo instead of foo=1)
-    KERNEL_PARAM_OPS_FL_NOARG = 1 << 0,
-}
