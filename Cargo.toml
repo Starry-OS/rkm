@@ -2,7 +2,6 @@
 members = [
     "kapi",
     "kbindings",
-    "kernel",
     "kmacro",
     "kmod",
     "kmod-loader",

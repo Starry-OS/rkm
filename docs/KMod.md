@@ -162,6 +162,18 @@ gcc -E \
     $COMMON/include/linux/module.h > module.i
 ```
 
+## Rusty kernel module的编译过程
+
+在编译Rusty kernel module时，通常会经历以下几个步骤：
+1. **编写模块代码**：使用Rust编写内核模块代码，定义模块的初始化和清理函数，以及所需的功能。
+2. **编译模块**：使用Cargo进行编译，生成静态库文件（`.rlib`）。在编译过程中，可能需要
+    指定适当的编译选项和目标，以确保生成的代码与内核环境兼容。
+3. **链接模块**：使用链接器（如`ld`）将生成的静态库文件直接进行单独链接，生成内核模块文件（`.ko`）。
+
+对于rust编译器来说，生成的`.rlib`文件实际上是一个归档文件（类似于`.a`文件），其中包含了编译后的目标文件和元数据。但是，`.rlib`文件与传统的静态库文件在格式上有所不同，它只包含当前crate的代码和数据，而不包含依赖项，这正是我们所需要的。
+
+**需要注意的是，不能在编译时开启LTO, LTO会生成链接器无法识别的内容**。
+
 ##  参考链接
 - riscv64架构对plt/got的处理: https://elixir.bootlin.com/linux/v6.6/source/arch/riscv/kernel/module-sections.c#L90
 - https://systemoverlord.com/2017/03/19/got-and-plt-for-pwning.html

@@ -36,7 +36,6 @@ else
 endif
 
 
-
 MODULE_PATHS ?= modules
 LINKER_SCRIPT ?= linker.ld
 
@@ -52,12 +51,6 @@ LINK_ARGS := \
   -C link-arg=-znostart-stop-gc \
   -C no-redzone=y
 
-# Derived variables
-# ifeq ($(TARGET),riscv64gc-unknown-none-elf)
-#     LD_COMMAND := ld.lld 
-# else
-#     LD_COMMAND := ld
-# endif
 LD_COMMAND := ld.lld
 
 # Get list of modules (directories in MODULE_PATHS)

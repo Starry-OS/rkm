@@ -16,7 +16,7 @@ fi
 BUILD_DIR="${BUILD_DIR:=target}"
 LD_COMMAND="${LD_COMMAND:=ld}"
 
-lib_path="${MODULE_BUILD_DIR}/lib${MODULE_NAME}.a"
+lib_path="${MODULE_BUILD_DIR}/lib${MODULE_NAME}.rlib"
 if [ ! -f "$lib_path" ]; then
     echo "Error: Library not found: $lib_path"
     exit 1
