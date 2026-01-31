@@ -174,6 +174,12 @@ gcc -E \
 
 **需要注意的是，不能在编译时开启LTO, LTO会生成链接器无法识别的内容**。
 
+和C语言不一样，Rust的编译器会尽可能对代码进行优化和内联，这可能会导致一些函数和数据没有被正确地导出到最终的模块文件中。这对kernel的编译很重要，因为可能一些函数在kernel部分没有被使用，但是在module部分被使用了。如果没有正确导出，这些module无法被正确加载和运行。
+
+RUSTFLAGS可以用来传递给rustc编译器的选项。解决上述问题的方法是使用`-C link-dead-code`选项，这个选项会告诉编译器保留所有的代码和数据，即使它们没有被使用。这样可以确保所有需要的符号都被正确地导出到最终的模块文件中，从而避免加载时出现未定义符号的错误。[Rust Reference: Link Dead Code](https://doc.rust-lang.org/rustc/codegen-options/index.html#link-dead-code)
+
+
+
 ##  参考链接
 - riscv64架构对plt/got的处理: https://elixir.bootlin.com/linux/v6.6/source/arch/riscv/kernel/module-sections.c#L90
 - https://systemoverlord.com/2017/03/19/got-and-plt-for-pwning.html
