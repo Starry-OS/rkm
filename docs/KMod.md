@@ -127,7 +127,10 @@ STANDARD_PARAM_DEF(hexint,	unsigned int,		"%#08x", 	kstrtouint);
 
 根据 [内核文档](https://www.kernel.org/doc/html/v5.8/x86/x86_64/mm.html) 中的描述：x86_64 架构下，内核模块所在的虚拟地址空间范围是 `0xffffffffa0000000` 到 `ffffffffff000000`。 这个地址区间的设置是与其重定位项相关的，对于`R_X86_64_32S`类型的重定位项，内核需要对计算出来的地址进行截断并进行符号扩展，以确保地址的正确性。如果高位不为1，加载器会返回错误。[What do R_X86_64_32S and R_X86_64_64 relocation mean?](https://stackoverflow.com/questions/6093547/what-do-r-x86-64-32s-and-r-x86-64-64-relocation-mean) 该文档有一些示例说明。
 
-目前，Starry的基座Arceos的内核地址空间起始地址位于`0xffff_8000_0020_0000`，其布局与Linux具有较大的差别。Linux内核在编译内核模块时会选用`code-model=kernel`，这与其地址空间布局密切相关。因此无法当前无法直接使用该code-model来编译内核模块。为了解决这个问题，目前的做法是使用`code-model=large`来编译内核模块，这样可以避免生成一些跟地址空间布局相关的重定位项，从而避免上述问题的发生。
+目前，Starry的基座Arceos的内核地址空间起始地址位于`0xffff_8000_0020_0000`，其布局与Linux具有较大的差别。Linux内核在编译内核模块时会选用`code-model=kernel`，这与其地址空间布局密切相关。因此无法当前无法直接使用该code-model来编译内核模块。为了解决这个问题，目前的做法是使用`code-model=large`来编译内核模块，这样可以避免生成一些跟地址空间布局相关的重定位项，从而避免上述问题的发生。但是使用该code-model会导致kernel
+部分编译的结果无法运行。在默认的的情况下，kernel部分会使用`code-model=small`进行编译。
+
+- [ ] **未来可以考虑通过修改内核地址空间布局来解决这个问题，从而使得内核模块可以使用`code-model=kernel`进行编译。**
 
 
 ### Linux数据结构
@@ -178,6 +181,10 @@ gcc -E \
 
 RUSTFLAGS可以用来传递给rustc编译器的选项。解决上述问题的方法是使用`-C link-dead-code`选项，这个选项会告诉编译器保留所有的代码和数据，即使它们没有被使用。这样可以确保所有需要的符号都被正确地导出到最终的模块文件中，从而避免加载时出现未定义符号的错误。[Rust Reference: Link Dead Code](https://doc.rust-lang.org/rustc/codegen-options/index.html#link-dead-code)
 
+`-C link-dead-code`选项与`-Zbuild-std=core,alloc,compiler_builtins`选项冲突，因此需要在使用`-C link-dead-code`时，移除`-Zbuild-std`选项。 [Rust Reference: Build Standard Library](https://github.com/rust-lang/rust/issues/137222)
+
+
+**在loongarch64架构下，`-C link-dead-code`选项必须对kernel的编译和module的编译都生效，否则会导致它们无法共享相同的编译产物。但是其它架构下，`-C link-dead-code`可以只针对kernel的编译生效。**
 
 
 ##  参考链接

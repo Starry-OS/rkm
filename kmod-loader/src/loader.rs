@@ -3,7 +3,6 @@ use crate::{ModuleErr, Result, module::ModuleInfo};
 use alloc::{
     boxed::Box,
     ffi::CString,
-    format,
     string::{String, ToString},
     vec::Vec,
 };
@@ -599,9 +598,13 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
                 continue;
             }
 
-            let sym_name = self.elf.strtab.get_at(sym.st_name).unwrap_or("<unknown>");
+            let sym_name = self
+                .elf
+                .strtab
+                .get_at(sym.st_name)
+                .unwrap_or("<unknown>")
+                .to_string();
 
-            let sym_name = format!("{:#}", rustc_demangle::demangle(sym_name));
             let sym_value = sym.st_value;
             let sym_size = sym.st_size;
 

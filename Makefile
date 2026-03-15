@@ -19,11 +19,11 @@
 # Default values
 
 ARCH ?= riscv64
-RUSTFLAGS := -C relocation-model=static
+RUSTFLAGS :=
 
 ifeq ($(ARCH), x86_64)
   TARGET := x86_64-unknown-none
-  RUSTFLAGS +=  -C code-model=large
+  RUSTFLAGS +=  -C code-model=small
 else ifeq ($(ARCH), aarch64)
   TARGET := aarch64-unknown-none-softfloat
 else ifeq ($(ARCH), riscv64)
@@ -41,7 +41,6 @@ LINKER_SCRIPT ?= linker.ld
 
 build_args := \
   -Zunstable-options \
-  -Zbuild-std=core,alloc,compiler_builtins \
   -Zbuild-std-features=compiler-builtins-mem \
   --release \
   --target $(TARGET)

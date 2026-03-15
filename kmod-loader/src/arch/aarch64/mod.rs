@@ -72,8 +72,11 @@ const fn do_reloc(op: Aarch64RelocOp, location: Ptr, address: u64) -> u64 {
 /// TODO: Implement the function
 ///
 /// See <https://elixir.bootlin.com/linux/v6.6/source/arch/arm64/include/asm/module.h#L45>
-const fn is_forbidden_offset_for_adrp(_address: u64) -> bool {
-    false
+fn is_forbidden_offset_for_adrp(address: u64) -> bool {
+    if (address & 0xfff) >= 0xff8 {
+        panic!("Offset {:#x} is forbidden for ADRP relocations", address);
+    }
+    (address & 0xfff) >= 0xff8
 }
 
 impl Aarch64RelocationType {
@@ -217,7 +220,7 @@ impl Aarch64RelocationType {
     }
 
     fn reloc_insn_adrp(&self, location: Ptr, address: u64) -> Result<bool> {
-        if !is_forbidden_offset_for_adrp(address) {
+        if !is_forbidden_offset_for_adrp(location.0) {
             return self.reloc_insn_imm(
                 Aarch64RelocOp::RELOC_OP_PAGE,
                 location,

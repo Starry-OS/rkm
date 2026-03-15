@@ -85,10 +85,9 @@ pub unsafe extern "C" fn _parse_integer_limit(
         }
 
         // Check for overflow only if we are within range of it in the max base we support (16)
-        if res & (!0u64 << 60) != 0
-            && res > (ULLONG_MAX - val as u64) / base as u64 {
-                rv |= KSTRTOX_OVERFLOW;
-            }
+        if res & (!0u64 << 60) != 0 && res > (ULLONG_MAX - val as u64) / base as u64 {
+            rv |= KSTRTOX_OVERFLOW;
+        }
         // res = res * base as u64 + val as u64;
         res = res.wrapping_mul(base as u64).wrapping_add(val as u64);
         rv += 1;

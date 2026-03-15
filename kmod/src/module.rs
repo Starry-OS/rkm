@@ -7,7 +7,6 @@ use crate::KernelParam;
 #[derive(Default)]
 pub struct Module(kbindings::module);
 
-
 unsafe impl Send for Module {}
 unsafe impl Sync for Module {}
 
@@ -36,12 +35,10 @@ impl Module {
     }
 
     pub fn take_init_fn(&mut self) -> Option<unsafe extern "C" fn() -> core::ffi::c_int> {
-        
         self.0.init.take()
     }
 
     pub fn take_exit_fn(&mut self) -> Option<unsafe extern "C" fn()> {
-        
         self.0.exit.take()
     }
 

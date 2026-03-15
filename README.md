@@ -138,7 +138,7 @@ module_param!(MY_PARAM, "int", 0o644, "My parameter description");
 ```
 
 ## 🎯 待办事项
-
+- [ ] 支持更多的重定位类型支持，包括生成plt/got
 - [ ] 完善文档和示例
 - [ ] 改进错误处理机制
 - [ ] 添加单元测试
