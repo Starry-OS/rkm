@@ -15,7 +15,7 @@ log = "0.4"
 bitfield-struct = "0.12"
 axerrno = "0.2"
 kmod = { path = "../kmod" }
-kapi = { path = "../kapi" }
+kapi = { path = "../kapi", features = ["kparameter"] }
 
 
 [features]
