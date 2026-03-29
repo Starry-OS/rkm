@@ -27,6 +27,10 @@ SECTIONS
         *(.bss .bss.*)
         *(COMMON)
     }
+    
+    .plt : { BYTE(0) }
+	.got : { BYTE(0) }
+	.got.plt : { BYTE(0) }
 
     /DISCARD/ : {
         *(.comment)

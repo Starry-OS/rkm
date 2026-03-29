@@ -1,16 +1,35 @@
-mod aarch64;
-mod loongarch64;
-mod riscv64;
-mod x86_64;
+cfg_if::cfg_if! {
+    if #[cfg(target_arch = "aarch64")] {
+        mod aarch64;
+        pub use aarch64::*;
+    } else if #[cfg(target_arch = "loongarch64")] {
+        mod loongarch64;
+        pub use loongarch64::*;
+    } else if #[cfg(target_arch = "riscv64")] {
+        mod riscv64;
+        pub use riscv64::*;
+    } else if #[cfg(target_arch = "x86_64")] {
+        mod x86_64;
+        pub use x86_64::*;
+    } else {
+        compile_error!("Unsupported architecture");
+    }
+}
 
-pub(crate) use aarch64::Aarch64ArchRelocate;
-pub use aarch64::Aarch64RelocationType;
-pub(crate) use loongarch64::Loongarch64ArchRelocate;
-pub use loongarch64::Loongarch64RelocationType;
-pub(crate) use riscv64::Riscv64ArchRelocate;
-pub use riscv64::Riscv64RelocationType;
-pub(crate) use x86_64::X86_64ArchRelocate;
-pub use x86_64::X86_64RelocationType;
+const SZ_128M: u64 = 0x08000000;
+const SZ_512K: u64 = 0x00080000;
+const SZ_128K: u64 = 0x00020000;
+const SZ_2K: u64 = 0x00000800;
+
+/**
+ * sign_extend64 - sign extend a 64-bit value using specified bit as sign-bit
+ * @value: value to sign extend
+ * @index: 0 based bit index (0<=index<64) to sign bit
+ */
+pub const fn sign_extend64(value: u64, index: u32) -> i64 {
+    let shift = 63 - index;
+    ((value << shift) as i64) >> shift
+}
 
 /// Extracts the relocation type from the r_info field of an Elf64_Rela
 const fn get_rela_type(r_info: u64) -> u32 {

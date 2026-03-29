@@ -1,16 +1,20 @@
-use goblin::elf::SectionHeader;
+use goblin::elf::{Elf, SectionHeader};
 use int_enum::IntEnum;
 
 use crate::arch::{Ptr, get_rela_sym_idx, get_rela_type};
 use crate::loader::{KernelModuleHelper, ModuleLoadInfo, ModuleOwner};
 use crate::{ModuleErr, Result};
 
+#[derive(Debug, Clone, Copy, Default)]
+#[repr(C)]
+pub struct ModuleArchSpecific {}
+
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, IntEnum, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 /// See <https://github.com/gimli-rs/object/blob/af3ca8a2817c8119e9b6d801bd678a8f1880309d/crates/examples/src/readobj/elf.rs#L3124>
 /// See <https://elixir.bootlin.com/linux/v6.6/source/arch/riscv/include/uapi/asm/elf.h#L40>
-pub enum Riscv64RelocationType {
+pub enum ArchRelocationType {
     /// None
     R_RISCV_NONE = 0,
     /// Runtime relocation: word32 = S + A
@@ -407,12 +411,12 @@ impl Rv64RelTy {
     }
 }
 
-type Rv64RelTy = Riscv64RelocationType;
+type Rv64RelTy = ArchRelocationType;
 
-pub struct Riscv64ArchRelocate;
+pub struct ArchRelocate;
 
 #[allow(unused_assignments)]
-impl Riscv64ArchRelocate {
+impl ArchRelocate {
     /// See <https://elixir.bootlin.com/linux/v6.6/source/arch/riscv/kernel/module.c#L313>
     pub fn apply_relocate_add<H: KernelModuleHelper>(
         rela_list: &[goblin::elf64::reloc::Rela],
@@ -428,7 +432,7 @@ impl Riscv64ArchRelocate {
             // This is where to make the change
             let location = sechdrs[rel_section.sh_info as usize].sh_addr + rela.r_offset;
 
-            let reloc_type = Riscv64RelocationType::try_from(rel_type).map_err(|_| {
+            let reloc_type = ArchRelocationType::try_from(rel_type).map_err(|_| {
                 log::error!(
                     "[{:?}]: Invalid relocation type: {}",
                     module.name(),
@@ -510,4 +514,12 @@ impl Riscv64ArchRelocate {
         }
         Ok(())
     }
+}
+
+/// See <https://elixir.bootlin.com/linux/v6.6/source/arch/riscv/kernel/module-sections.c#L90>
+pub fn module_frob_arch_sections<H: KernelModuleHelper>(
+    elf: &mut Elf,
+    owner: &mut ModuleOwner<H>,
+) -> Result<()> {
+    unimplemented!("Section frobbing not implemented yet");
 }

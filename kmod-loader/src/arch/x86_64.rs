@@ -1,15 +1,19 @@
-use goblin::elf::SectionHeader;
+use goblin::elf::{Elf, SectionHeader};
 use int_enum::IntEnum;
 
 use crate::arch::{Ptr, get_rela_sym_idx, get_rela_type};
 use crate::loader::{KernelModuleHelper, ModuleLoadInfo, ModuleOwner};
 use crate::{ModuleErr, Result};
 
+#[derive(Debug, Clone, Copy, Default)]
+#[repr(C)]
+pub struct ModuleArchSpecific {}
+
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, IntEnum)]
 #[allow(non_camel_case_types)]
 /// See <https://elixir.bootlin.com/linux/v6.6/source/arch/x86/include/asm/elf.h#L47>
-pub enum X86_64RelocationType {
+pub enum ArchRelocationType {
     /// No reloc
     R_X86_64_NONE = 0,
     /// Direct 64 bit
@@ -46,9 +50,9 @@ pub enum X86_64RelocationType {
     R_X86_64_PC64 = 24,
 }
 
-type X64RelTy = X86_64RelocationType;
+type X64RelTy = ArchRelocationType;
 
-impl X86_64RelocationType {
+impl ArchRelocationType {
     fn apply_relocation(&self, location: u64, mut target_addr: u64) -> Result<()> {
         let size;
         let location = Ptr(location);
@@ -115,10 +119,10 @@ impl X86_64RelocationType {
     }
 }
 
-pub struct X86_64ArchRelocate;
+pub struct ArchRelocate;
 
 #[allow(unused_assignments)]
-impl X86_64ArchRelocate {
+impl ArchRelocate {
     /// See https://elixir.bootlin.com/linux/v6.6/source/arch/x86/kernel/module.c#L252
     pub fn apply_relocate_add<H: KernelModuleHelper>(
         rela_list: &[goblin::elf64::reloc::Rela],
@@ -135,7 +139,7 @@ impl X86_64ArchRelocate {
             let location = sechdrs[rel_section.sh_info as usize].sh_addr + rela.r_offset;
             let (sym, sym_name) = &load_info.syms[sym_idx];
 
-            let reloc_type = X86_64RelocationType::try_from(rel_type).map_err(|_| {
+            let reloc_type = ArchRelocationType::try_from(rel_type).map_err(|_| {
                 log::error!(
                     "[{:?}]: Invalid relocation type: {}",
                     module.name(),
@@ -165,4 +169,11 @@ impl X86_64ArchRelocate {
         }
         Ok(())
     }
+}
+
+pub fn module_frob_arch_sections<H: KernelModuleHelper>(
+    elf: &mut Elf,
+    owner: &mut ModuleOwner<H>,
+) -> Result<()> {
+    unimplemented!()
 }

@@ -1,4 +1,4 @@
-use crate::{ModuleErr, Result, module::ModuleInfo};
+use crate::{ModuleErr, Result, arch::ModuleArchSpecific, module::ModuleInfo};
 
 use alloc::{
     boxed::Box,
@@ -53,7 +53,7 @@ impl SectionPerm {
     }
 }
 
-/// Trait to get raw pointer from a reference
+/// Trait for accessing and manipulating memory for module sections
 pub trait SectionMemOps: Send + Sync {
     fn as_ptr(&self) -> *const u8;
     fn as_mut_ptr(&mut self) -> *mut u8;
@@ -89,19 +89,20 @@ struct SectionPages {
 pub struct ModuleOwner<H: KernelModuleHelper> {
     module_info: ModuleInfo,
     pages: Vec<SectionPages>,
-    name: Option<String>,
+    name: String,
     module: Module,
+    pub(crate) arch: ModuleArchSpecific,
     _helper: core::marker::PhantomData<H>,
 }
 
 impl<H: KernelModuleHelper> ModuleOwner<H> {
     /// Get the name of the module
-    pub fn name(&self) -> Option<&str> {
-        self.name.as_deref()
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     pub(crate) fn set_name(&mut self, name: &str) {
-        self.name = Some(name.to_string());
+        self.name = name.to_string();
     }
 
     /// Call the module's init function
@@ -275,7 +276,7 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
             }
         }
         let mut owner = owner.ok_or(ModuleErr::ENOEXEC)?;
-        let module_name = owner.name().unwrap_or("<unknown>");
+        let module_name = owner.name();
 
         if num_sym_secs != 1 {
             log::error!("{}: module has no symbols (stripped?)", module_name);
@@ -298,7 +299,7 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
          */
         if num_mod_secs != 1 {
             log::error!(
-                "module {}: Only one .gnu.linkonce.this_module section must exist.",
+                "{}: Only one .gnu.linkonce.this_module section must exist.",
                 module_name
             );
             return Err(ModuleErr::ENOEXEC);
@@ -307,7 +308,7 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
         let this_module_shdr = &self.elf.section_headers[mod_idx];
         if this_module_shdr.sh_type == goblin::elf::section_header::SHT_NOBITS {
             log::error!(
-                "module {}: .gnu.linkonce.this_module section must have a size set",
+                "{}: .gnu.linkonce.this_module section must have a size set",
                 module_name
             );
             return Err(ModuleErr::ENOEXEC);
@@ -315,14 +316,14 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
 
         if this_module_shdr.sh_flags & goblin::elf::section_header::SHF_ALLOC as u64 == 0 {
             log::error!(
-                "module {}: .gnu.linkonce.this_module section size must match the kernel's built struct module size at run time",
+                "{}: .gnu.linkonce.this_module section size must match the kernel's built struct module size at run time",
                 module_name
             );
             return Err(ModuleErr::ENOEXEC);
         }
         // If we didn't load the .modinfo 'name' field earlier, fall back to
         // on-disk struct mod 'name' field.
-        if owner.name().is_none() {
+        if owner.name().is_empty() {
             self.pre_read_this_module(mod_idx, &mut owner)?;
         }
         Ok(owner)
@@ -339,8 +340,8 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
         let mut owner = self.elf_validity_cache_copy()?;
 
         self.layout_and_allocate(&mut owner)?;
-        let load_info: ModuleLoadInfo = self.simplify_symbols(&owner)?;
-        self.apply_relocations(load_info, &owner)?;
+        let load_info = self.simplify_symbols(&owner)?;
+        self.apply_relocations(load_info, &mut owner)?;
 
         self.post_read_this_module(&mut owner)?;
 
@@ -356,7 +357,7 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
 
     /// Args looks like "foo=bar,bar2 baz=fuz wiz". Parse them and set module parameters.
     fn parse_args(&self, owner: &mut ModuleOwner<H>, args: CString) -> Result<()> {
-        let name = owner.name().unwrap_or("unknown").to_string();
+        let name = owner.name().to_string();
         let kparams = owner.module.params_mut();
         let after_dashes = crate::param::parse_args(&name, args, kparams, i16::MIN, i16::MAX)?;
         if !after_dashes.is_empty() {
@@ -414,13 +415,17 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
             module_info.add_kv(key, value);
         }
 
-        let name = module_info.get("name").map(|s| s.to_string());
+        let name = module_info
+            .get("name")
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "".to_string());
 
         Ok(ModuleOwner {
             name,
             module_info,
             pages: Vec::new(),
             module: Module::default(),
+            arch: ModuleArchSpecific::default(),
             _helper: core::marker::PhantomData,
         })
     }
@@ -509,7 +514,9 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
     /// Layout sections and allocate memory
     /// See <https://elixir.bootlin.com/linux/v6.6/source/kernel/module/main.c#L2363>
     fn layout_and_allocate(&mut self, owner: &mut ModuleOwner<H>) -> Result<()> {
-        for shdr in &mut self.elf.section_headers {
+        // Allow arches to frob section contents and sizes
+        crate::arch::module_frob_arch_sections(&mut self.elf, owner)?;
+        for shdr in self.elf.section_headers.iter_mut() {
             let sec_name = self
                 .elf
                 .shdr_strtab
@@ -695,7 +702,11 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
     }
 
     /// See <https://elixir.bootlin.com/linux/v6.6/source/kernel/module/main.c#L1438>
-    fn apply_relocations(&self, load_info: ModuleLoadInfo, owner: &ModuleOwner<H>) -> Result<()> {
+    fn apply_relocations(
+        &self,
+        load_info: ModuleLoadInfo,
+        owner: &mut ModuleOwner<H>,
+    ) -> Result<()> {
         for shdr in self.elf.section_headers.iter() {
             let infosec = shdr.sh_info;
 
@@ -746,62 +757,15 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
                 goblin::elf64::reloc::from_raw_rela(data_buf.as_ptr() as _, shdr.sh_size as usize)
             };
 
-            match self.elf.header.e_machine {
-                goblin::elf::header::EM_RISCV => {
-                    crate::arch::Riscv64ArchRelocate::apply_relocate_add(
-                        rela_list,
-                        shdr,
-                        &self.elf.section_headers,
-                        &load_info,
-                        owner,
-                    )?;
-                }
-                goblin::elf::header::EM_LOONGARCH => {
-                    crate::arch::Loongarch64ArchRelocate::apply_relocate_add(
-                        rela_list,
-                        shdr,
-                        &self.elf.section_headers,
-                        &load_info,
-                        owner,
-                    )?;
-                }
-                goblin::elf::header::EM_AARCH64 => {
-                    crate::arch::Aarch64ArchRelocate::apply_relocate_add(
-                        rela_list,
-                        shdr,
-                        &self.elf.section_headers,
-                        &load_info,
-                        owner,
-                    )?;
-                }
-                goblin::elf::header::EM_X86_64 => {
-                    crate::arch::X86_64ArchRelocate::apply_relocate_add(
-                        rela_list,
-                        shdr,
-                        &self.elf.section_headers,
-                        &load_info,
-                        owner,
-                    )?;
-                }
-                _ => {
-                    panic!(
-                        "Relocations for architecture '{}' not supported",
-                        self.get_machine_type()
-                    );
-                }
-            }
+            crate::arch::ArchRelocate::apply_relocate_add(
+                rela_list,
+                shdr,
+                &self.elf.section_headers,
+                &load_info,
+                owner,
+            )?;
         }
         Ok(())
-    }
-
-    fn get_machine_type(&self) -> &'static str {
-        match self.elf.header.e_machine {
-            goblin::elf::header::EM_X86_64 => "x86-64",
-            goblin::elf::header::EM_AARCH64 => "AArch64",
-            goblin::elf::header::EM_RISCV => "RISC-V",
-            goblin::elf::header::EM_LOONGARCH => "LoongArch",
-            _ => "unknown",
-        }
     }
 }
 

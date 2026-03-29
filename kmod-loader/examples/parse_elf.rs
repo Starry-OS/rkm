@@ -2,12 +2,9 @@ use std::env;
 use std::path::Path;
 
 use goblin::elf::Elf;
+use kmod_loader::arch::ArchRelocationType;
 use std::string::{String, ToString};
 use std::{collections::BTreeMap, format};
-
-use kmod_loader::arch::{
-    Aarch64RelocationType, Loongarch64RelocationType, Riscv64RelocationType, X86_64RelocationType,
-};
 
 pub struct ElfParser<'a> {
     elf: Elf<'a>,
@@ -146,18 +143,7 @@ impl<'a> ElfParser<'a> {
     }
 
     fn get_rel_type(&self, rel_type: u32) -> String {
-        let ty = match self.get_machine_type() {
-            "x86-64" => X86_64RelocationType::try_from(rel_type).map(|ty| format!("{ty:?}")),
-            "RISC-V" => Riscv64RelocationType::try_from(rel_type).map(|ty| format!("{ty:?}")),
-            "LoongArch" => {
-                Loongarch64RelocationType::try_from(rel_type).map(|ty| format!("{ty:?}"))
-            }
-            "AArch64" => Aarch64RelocationType::try_from(rel_type).map(|ty| format!("{ty:?}")),
-            ty => unimplemented!(
-                "Relocation type parsing not implemented for machine type: {}",
-                ty
-            ),
-        };
+        let ty = ArchRelocationType::try_from(rel_type).map(|ty| format!("{ty:?}"));
         ty.unwrap_or_else(|_| format!("Unknown({})", rel_type))
     }
 

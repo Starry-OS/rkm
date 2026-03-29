@@ -1,17 +1,59 @@
+#[macro_use]
 mod inst;
 use crate::arch::loongarch64::inst::*;
 use crate::arch::*;
 use crate::loader::*;
 use crate::{ModuleErr, Result};
+use goblin::elf::Elf;
+use goblin::elf::Reloc;
+use goblin::elf::RelocSection;
 use goblin::elf::SectionHeader;
+use goblin::elf::SectionHeaders;
 use int_enum::IntEnum;
+
+#[derive(Debug, Clone, Copy, Default)]
+#[repr(C)]
+struct ModSection {
+    shndx: usize,
+    num_entries: usize,
+    max_entries: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+#[repr(C)]
+pub struct ModuleArchSpecific {
+    got: ModSection,
+    plt: ModSection,
+    plt_idx: ModSection,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+struct GotEntry {
+    symbol_addr: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+struct PltEntry {
+    inst_lu12iw: u32,
+    inst_lu32id: u32,
+    inst_lu52id: u32,
+    inst_jirl: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+struct PltIdxEntry {
+    symbol_addr: u64,
+}
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, IntEnum, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 /// See <https://github.com/gimli-rs/object/blob/af3ca8a2817c8119e9b6d801bd678a8f1880309d/crates/examples/src/readobj/elf.rs#L3251>
 /// See <https://elixir.bootlin.com/linux/v6.6/source/arch/loongarch/include/asm/elf.h#L24>
-pub enum Loongarch64RelocationType {
+pub enum ArchRelocationType {
     R_LARCH_NONE = 0,
     R_LARCH_32 = 1,
     R_LARCH_64 = 2,
@@ -130,10 +172,9 @@ pub enum Loongarch64RelocationType {
     R_LARCH_TLS_GD_PCREL20_S2 = 125,
     R_LARCH_TLS_DESC_PCREL20_S2 = 126,
 }
-type LaRelTy = Loongarch64RelocationType;
+type LaRelTy = ArchRelocationType;
 
 const RELA_STACK_DEPTH: usize = 16;
-const SZ_128M: u64 = 0x08000000;
 
 const fn signed_imm_check(value: i64, bits: u32) -> bool {
     let limit = 1i64 << (bits - 1);
@@ -143,14 +184,6 @@ const fn signed_imm_check(value: i64, bits: u32) -> bool {
 const fn unsigned_imm_check(value: u64, bits: u32) -> bool {
     let limit = 1u64 << bits;
     value < limit
-}
-
-fn module_emit_got_entry() -> u64 {
-    unimplemented!("module_emit_got_entry is not implemented yet");
-}
-
-fn module_emit_plt_entry() -> u64 {
-    unimplemented!("module_emit_plt_entry is not implemented yet");
 }
 
 fn rela_stack_push(
@@ -194,15 +227,27 @@ fn rela_stack_pop(
     Ok(value)
 }
 
-impl Loongarch64RelocationType {
+impl ArchRelocationType {
     /// See <https://elixir.bootlin.com/linux/v6.6/source/arch/loongarch/kernel/module.c#L278>
-    fn apply_r_larch_b26(&self, location: Ptr, address: u64) -> Result<()> {
+    fn apply_r_larch_b26(
+        &self,
+        module: &mut ModuleOwner<impl KernelModuleHelper>,
+        sechdrs: &SectionHeaders,
+        location: Ptr,
+        mut address: u64,
+    ) -> Result<()> {
         let mut offset = address as i64 - location.0 as i64;
         if offset < -(SZ_128M as i64) || offset >= SZ_128M as i64 {
-            // TODO: module_emit_plt_entry
-            log::error!("R_LARCH_B26 relocation out of range: offset = {}", offset);
-            return Err(ModuleErr::ENOEXEC);
+            let plt_entry = module_emit_plt_entry(module, sechdrs, address);
+            assert!(
+                plt_entry.is_some(),
+                "Failed to emit PLT entry for address {:#x}",
+                address
+            );
+            address = plt_entry.unwrap() as *mut PltEntry as u64;
         }
+
+        offset = address as i64 - location.0 as i64;
 
         if offset & 3 != 0 {
             log::error!(
@@ -238,6 +283,7 @@ impl Loongarch64RelocationType {
 
     fn apply_r_larch_pcala(
         &self,
+        module: &mut ModuleOwner<impl KernelModuleHelper>,
         location: Ptr,
         address: u64,
         _rela_stack_top: &mut usize,
@@ -282,7 +328,7 @@ impl Loongarch64RelocationType {
                 inst.into_bits()
             }
             _ => {
-                log::error!("Relocation type {:?} not implemented yet", self);
+                log::error!("{}: Unsupport relocation type: {:?}", module.name(), self);
                 return Err(ModuleErr::ENOEXEC);
             }
         };
@@ -306,29 +352,37 @@ impl Loongarch64RelocationType {
 
     fn apply_r_larch_got_pc(
         &self,
+        module: &mut ModuleOwner<impl KernelModuleHelper>,
+        sechdrs: &SectionHeaders,
         location: Ptr,
-        _address: u64,
+        address: u64,
         rela_stack_top: &mut usize,
         rela_stack: &[i64; RELA_STACK_DEPTH],
     ) -> Result<()> {
-        // TODO: module_emit_got_entry
-        log::error!("apply_r_larch_got_pc is not implemented yet");
-        let got = module_emit_got_entry();
+        let got = module_emit_got_entry(module, sechdrs, address);
+
+        if got.is_none() {
+            return Err(ModuleErr::EINVAL);
+        }
+        let got = got.unwrap();
+
         let new_ty = match self {
-            Loongarch64RelocationType::R_LARCH_GOT_PC_HI20 => {
-                Loongarch64RelocationType::R_LARCH_PCALA_LO12
+            LaRelTy::R_LARCH_GOT_PC_HI20 => LaRelTy::R_LARCH_PCALA_LO12,
+            LaRelTy::R_LARCH_GOT_PC_LO12 => LaRelTy::R_LARCH_PCALA_HI20,
+            _ => {
+                log::error!("{}: Unsupport relocation type: {:?}", module.name(), self);
+                return Err(ModuleErr::EINVAL);
             }
-            Loongarch64RelocationType::R_LARCH_GOT_PC_LO12 => {
-                Loongarch64RelocationType::R_LARCH_PCALA_HI20
-            }
-            _ => unreachable!(),
         };
-        new_ty.apply_r_larch_pcala(location, got, rela_stack_top, rela_stack)
+        let got_address = got as *mut GotEntry as u64;
+        new_ty.apply_r_larch_pcala(module, location, got_address, rela_stack_top, rela_stack)
     }
 
     /// See <https://elixir.bootlin.com/linux/v6.6/source/arch/loongarch/kernel/module.c#L104>
     fn apply_r_larch_sop_push_plt_pcrel(
         &self,
+        module: &mut ModuleOwner<impl KernelModuleHelper>,
+        sechdrs: &SectionHeaders,
         location: Ptr,
         mut address: u64,
         rela_stack_top: &mut usize,
@@ -336,12 +390,15 @@ impl Loongarch64RelocationType {
     ) -> Result<()> {
         let offset = address as i64 - location.0 as i64;
         if offset < -(SZ_128M as i64) || offset >= SZ_128M as i64 {
-            // TODO: module_emit_plt_entry
-            log::error!(
-                "R_LARCH_SOP_PUSH_PLT_PCREL relocation out of range: offset = {}",
-                offset
+            let plt_entry = module_emit_plt_entry(module, sechdrs, address);
+
+            assert!(
+                plt_entry.is_some(),
+                "Failed to emit PLT entry for address {:#x}",
+                address
             );
-            address = module_emit_plt_entry();
+
+            address = plt_entry.unwrap() as *mut PltEntry as u64;
         }
         self.apply_r_larch_sop_push_pcrel(location, address, rela_stack_top, rela_stack)
     }
@@ -577,6 +634,8 @@ impl Loongarch64RelocationType {
 
     pub fn apply_relocation(
         &self,
+        module: &mut ModuleOwner<impl KernelModuleHelper>,
+        sechdrs: &SectionHeaders,
         location: u64,
         address: u64,
         rela_stack_top: &mut usize,
@@ -585,13 +644,24 @@ impl Loongarch64RelocationType {
         let location = Ptr(location);
 
         match *self {
-            LaRelTy::R_LARCH_B26 => self.apply_r_larch_b26(location, address),
-            LaRelTy::R_LARCH_GOT_PC_HI20 | LaRelTy::R_LARCH_GOT_PC_LO12 => {
-                self.apply_r_larch_got_pc(location, address, rela_stack_top, rela_stack)
-            }
-            LaRelTy::R_LARCH_SOP_PUSH_PLT_PCREL => {
-                self.apply_r_larch_sop_push_plt_pcrel(location, address, rela_stack_top, rela_stack)
-            }
+            LaRelTy::R_LARCH_B26 => self.apply_r_larch_b26(module, sechdrs, location, address),
+            LaRelTy::R_LARCH_GOT_PC_HI20 | LaRelTy::R_LARCH_GOT_PC_LO12 => self
+                .apply_r_larch_got_pc(
+                    module,
+                    sechdrs,
+                    location,
+                    address,
+                    rela_stack_top,
+                    rela_stack,
+                ),
+            LaRelTy::R_LARCH_SOP_PUSH_PLT_PCREL => self.apply_r_larch_sop_push_plt_pcrel(
+                module,
+                sechdrs,
+                location,
+                address,
+                rela_stack_top,
+                rela_stack,
+            ),
 
             LaRelTy::R_LARCH_NONE => self.apply_r_larch_none(location, address),
             LaRelTy::R_LARCH_32 => self.apply_r_larch_32(location, address),
@@ -645,7 +715,7 @@ impl Loongarch64RelocationType {
             | LaRelTy::R_LARCH_PCALA_LO12
             | LaRelTy::R_LARCH_PCALA64_LO20
             | LaRelTy::R_LARCH_PCALA64_HI12 => {
-                self.apply_r_larch_pcala(location, address, rela_stack_top, rela_stack)
+                self.apply_r_larch_pcala(module, location, address, rela_stack_top, rela_stack)
             }
 
             LaRelTy::R_LARCH_32_PCREL => self.apply_r_larch_32_pcrel(location, address),
@@ -657,16 +727,16 @@ impl Loongarch64RelocationType {
     }
 }
 
-pub struct Loongarch64ArchRelocate;
+pub struct ArchRelocate;
 
-impl Loongarch64ArchRelocate {
+impl ArchRelocate {
     /// See <https://elixir.bootlin.com/linux/v6.6/source/arch/loongarch/kernel/module.c#L421>
     pub fn apply_relocate_add<H: KernelModuleHelper>(
         rela_list: &[goblin::elf64::reloc::Rela],
         rel_section: &SectionHeader,
-        sechdrs: &[SectionHeader],
+        sechdrs: &SectionHeaders,
         load_info: &ModuleLoadInfo,
-        module: &ModuleOwner<H>,
+        module: &mut ModuleOwner<H>,
     ) -> Result<()> {
         let mut rela_stack = [0i64; RELA_STACK_DEPTH];
         let mut rela_stack_top = 0;
@@ -687,7 +757,7 @@ impl Loongarch64ArchRelocate {
             //     return -ENOENT;
             // }
 
-            let reloc_type = Loongarch64RelocationType::try_from(rel_type).map_err(|_| {
+            let reloc_type = ArchRelocationType::try_from(rel_type).map_err(|_| {
                 log::error!(
                     "[{:?}]: Invalid relocation type: {}",
                     module.name(),
@@ -704,6 +774,8 @@ impl Loongarch64ArchRelocate {
                 target_addr,
             );
             let res = reloc_type.apply_relocation(
+                module,
+                sechdrs,
                 location,
                 target_addr,
                 &mut rela_stack_top,
@@ -720,4 +792,290 @@ impl Loongarch64ArchRelocate {
         }
         Ok(())
     }
+}
+
+fn get_got_entry(
+    address: u64,
+    sechdrs: &SectionHeaders,
+    sec: &ModSection,
+) -> Option<&'static mut GotEntry> {
+    let got_entries_addr = sechdrs[sec.shndx].sh_addr;
+    let got_entries = unsafe {
+        core::slice::from_raw_parts_mut(got_entries_addr as *mut GotEntry, sec.max_entries as usize)
+    };
+
+    got_entries[0..sec.num_entries as usize]
+        .iter_mut()
+        .find(|entry| entry.symbol_addr == address)
+}
+
+fn get_plt_idx(address: u64, sechdrs: &SectionHeaders, sec: &ModSection) -> Option<usize> {
+    let plt_idx_addr = sechdrs[sec.shndx].sh_addr;
+    let plt_idx_entries = unsafe {
+        core::slice::from_raw_parts_mut(plt_idx_addr as *mut PltIdxEntry, sec.max_entries as usize)
+    };
+    plt_idx_entries[0..sec.num_entries as usize]
+        .iter()
+        .position(|entry| entry.symbol_addr == address)
+}
+
+fn get_plt_entry(
+    address: u64,
+    sechdrs: &SectionHeaders,
+    plt_sec: &ModSection,
+    plt_idx_sec: &ModSection,
+) -> Option<&'static mut PltEntry> {
+    let plt_idx = get_plt_idx(address, sechdrs, plt_idx_sec);
+    if plt_idx.is_none() {
+        return None;
+    }
+    let plt_idx = plt_idx.unwrap();
+
+    let plt_entries_addr = sechdrs[plt_sec.shndx].sh_addr;
+    let plt_entries = unsafe {
+        core::slice::from_raw_parts_mut(
+            plt_entries_addr as *mut PltEntry,
+            plt_sec.max_entries as usize,
+        )
+    };
+    Some(&mut plt_entries[plt_idx])
+}
+
+fn emit_got_entry(address: u64) -> GotEntry {
+    GotEntry {
+        symbol_addr: address,
+    }
+}
+
+fn emit_plt_idx_entry(address: u64) -> PltIdxEntry {
+    PltIdxEntry {
+        symbol_addr: address,
+    }
+}
+
+fn emit_plt_entry(address: u64) -> PltEntry {
+    let lu12iw = larch_insn_gen_lu12iw(
+        loongarch_gpr::LOONGARCH_GPR_T1,
+        ADDR_IMM!(address, LU12IW) as _,
+    );
+    let lu32id = larch_insn_gen_lu32id(
+        loongarch_gpr::LOONGARCH_GPR_T1,
+        ADDR_IMM!(address, LU32ID) as _,
+    );
+    let lu52id = larch_insn_gen_lu52id(
+        loongarch_gpr::LOONGARCH_GPR_T1,
+        loongarch_gpr::LOONGARCH_GPR_T1,
+        ADDR_IMM!(address, LU52ID) as _,
+    );
+    let jirl = larch_insn_gen_jirl(
+        loongarch_gpr::LOONGARCH_GPR_ZERO,
+        loongarch_gpr::LOONGARCH_GPR_T1,
+        ADDR_IMM!(address, ORI) as _,
+    );
+    PltEntry {
+        inst_lu12iw: lu12iw,
+        inst_lu32id: lu32id,
+        inst_lu52id: lu52id,
+        inst_jirl: jirl,
+    }
+}
+
+/// See <https://elixir.bootlin.com/linux/v6.6/source/arch/loongarch/kernel/module-sections.c#L12>
+fn module_emit_got_entry(
+    module: &mut ModuleOwner<impl KernelModuleHelper>,
+    sechdrs: &SectionHeaders,
+    address: u64,
+) -> Option<&'static mut GotEntry> {
+    let got_sec = &mut module.arch.got;
+    let idx = got_sec.num_entries;
+    let got = get_got_entry(address, sechdrs, got_sec);
+    if got.is_some() {
+        return got;
+    }
+    // There is no GOT entry for val yet, create a new one.
+    let got_entries_addr = sechdrs[got_sec.shndx].sh_addr;
+    let got_entries = unsafe {
+        core::slice::from_raw_parts_mut(
+            got_entries_addr as *mut GotEntry,
+            got_sec.max_entries as usize,
+        )
+    };
+    got_entries[idx as usize] = emit_got_entry(address);
+    got_sec.num_entries += 1;
+    if got_sec.num_entries > got_sec.max_entries {
+        log::error!("{}: module contains bad GOT relocation", module.name());
+        return None;
+    }
+    return Some(&mut got_entries[idx as usize]);
+}
+
+/// See <https://elixir.bootlin.com/linux/v6.6/source/arch/loongarch/kernel/module-sections.c#L38>
+fn module_emit_plt_entry(
+    module: &mut ModuleOwner<impl KernelModuleHelper>,
+    sechdrs: &SectionHeaders,
+    address: u64,
+) -> Option<&'static mut PltEntry> {
+    let plt_sec = &mut module.arch.plt;
+    let plt_idx_sec = &mut module.arch.plt_idx;
+    let plt = get_plt_entry(address, sechdrs, plt_sec, plt_idx_sec);
+    if plt.is_some() {
+        return plt;
+    }
+    let nr = plt_sec.num_entries;
+    // There is no duplicate entry, create a new one
+    let plt_entries_addr = sechdrs[plt_sec.shndx].sh_addr;
+    let plt_entries = unsafe {
+        core::slice::from_raw_parts_mut(
+            plt_entries_addr as *mut PltEntry,
+            plt_sec.max_entries as usize,
+        )
+    };
+
+    // write the PLT entry
+    plt_entries[nr] = emit_plt_entry(address);
+
+    let plt_idx_addr = sechdrs[plt_idx_sec.shndx].sh_addr;
+    let plt_idx_entries = unsafe {
+        core::slice::from_raw_parts_mut(
+            plt_idx_addr as *mut PltIdxEntry,
+            plt_idx_sec.max_entries as usize,
+        )
+    };
+    // write the PLT.IDX entry
+    plt_idx_entries[nr] = emit_plt_idx_entry(address);
+
+    plt_sec.num_entries += 1;
+    plt_idx_sec.num_entries += 1;
+
+    if plt_sec.num_entries > plt_sec.max_entries {
+        panic!("{}: too many PLT entries", module.name());
+    }
+
+    return Some(&mut plt_entries[nr]);
+}
+
+/// See <https://elixir.bootlin.com/linux/v6.6/source/arch/loongarch/kernel/module-sections.c#L104>
+pub fn module_frob_arch_sections<H: KernelModuleHelper>(
+    elf: &mut Elf,
+    owner: &mut ModuleOwner<H>,
+) -> Result<()> {
+    let mut got_section_idx = None;
+    let mut plt_section_idx = None;
+    let mut plt_idx_section_idx = None;
+    // Find the empty .plt sections.
+    for (idx, shdr) in elf.section_headers.iter_mut().enumerate() {
+        let sec_name = elf.shdr_strtab.get_at(shdr.sh_name).unwrap_or("<unknown>");
+        if sec_name == ".got" {
+            got_section_idx = Some(idx);
+        } else if sec_name == ".plt" {
+            plt_section_idx = Some(idx);
+        } else if sec_name == ".plt.idx" {
+            plt_idx_section_idx = Some(idx);
+        }
+    }
+    if got_section_idx.is_none() {
+        log::error!("{:?}: module GOT section(s) missing", owner.name());
+        return Err(ModuleErr::ENOEXEC);
+    }
+    if plt_section_idx.is_none() {
+        log::error!("{:?}: module PLT section(s) missing", owner.name());
+        return Err(ModuleErr::ENOEXEC);
+    }
+    if plt_idx_section_idx.is_none() {
+        log::error!("{:?}: module PLT.IDX section(s) missing", owner.name());
+        return Err(ModuleErr::ENOEXEC);
+    }
+
+    owner.arch.got.shndx = got_section_idx.unwrap();
+    owner.arch.plt.shndx = plt_section_idx.unwrap();
+    owner.arch.plt_idx.shndx = plt_idx_section_idx.unwrap();
+
+    let mut num_plts = 0;
+    let mut num_gots = 0;
+    // Calculate the maxinum number of entries
+    for (idx, rela_sec) in elf.shdr_relocs.iter() {
+        let shdr = &elf.section_headers[*idx];
+        if shdr.sh_type != goblin::elf::section_header::SHT_RELA {
+            continue;
+        }
+        let infosec = shdr.sh_info;
+        let to_section = &elf.section_headers[infosec as usize];
+        // ignore relocations that operate on non-exec sections
+        if to_section.sh_flags & goblin::elf::section_header::SHF_EXECINSTR as u64 == 0 {
+            continue;
+        }
+        let (plt_entries, got_entries) = count_max_entries(rela_sec);
+        num_plts += plt_entries;
+        num_gots += got_entries;
+    }
+
+    {
+        let got_sec = &mut elf.section_headers[got_section_idx.unwrap()];
+        got_sec.sh_type = goblin::elf::section_header::SHT_NOBITS;
+        got_sec.sh_flags = goblin::elf::section_header::SHF_ALLOC as u64;
+        got_sec.sh_addralign = 64; // TODO: L1_CACHE_BYTES
+        got_sec.sh_size = (num_gots as u64 + 1) * size_of::<GotEntry>() as u64;
+        owner.arch.got.num_entries = 0;
+        owner.arch.got.max_entries = num_gots;
+    }
+
+    {
+        let plt_sec = &mut elf.section_headers[plt_section_idx.unwrap()];
+        plt_sec.sh_type = goblin::elf::section_header::SHT_PROGBITS;
+        plt_sec.sh_flags = (goblin::elf::section_header::SHF_ALLOC
+            | goblin::elf::section_header::SHF_EXECINSTR) as u64;
+        plt_sec.sh_addralign = 64;
+        plt_sec.sh_size = (num_plts as u64 + 1) * size_of::<PltEntry>() as u64;
+        owner.arch.plt.num_entries = 0;
+        owner.arch.plt.max_entries = num_plts;
+    }
+
+    {
+        let plt_idx_sec = &mut elf.section_headers[plt_idx_section_idx.unwrap()];
+        plt_idx_sec.sh_type = goblin::elf::section_header::SHT_PROGBITS;
+        plt_idx_sec.sh_flags = goblin::elf::section_header::SHF_ALLOC as u64;
+        plt_idx_sec.sh_addralign = 64;
+        plt_idx_sec.sh_size = (num_plts as u64 + 1) * size_of::<PltIdxEntry>() as u64;
+        owner.arch.plt_idx.num_entries = 0;
+        owner.arch.plt_idx.max_entries = num_plts;
+    }
+    Ok(())
+}
+
+fn count_max_entries(rela_sec: &RelocSection) -> (usize, usize) {
+    let mut plt_entries = 0;
+    let mut got_entries = 0;
+    for (idx, rela) in rela_sec.iter().enumerate() {
+        let rel_type = rela.r_type;
+        let reloc_type = LaRelTy::try_from(rel_type).expect("Invalid relocation type");
+        match reloc_type {
+            LaRelTy::R_LARCH_SOP_PUSH_PLT_PCREL | LaRelTy::R_LARCH_B26 => {
+                if !duplicate_rela(rela_sec, idx) {
+                    plt_entries += 1;
+                }
+            }
+            LaRelTy::R_LARCH_GOT_PC_HI20 => {
+                if !duplicate_rela(rela_sec, idx) {
+                    got_entries += 1;
+                }
+            }
+            _ => { /* Other relocation types do not require GOT/PLT entries */ }
+        }
+    }
+    (plt_entries, got_entries)
+}
+
+fn duplicate_rela(rela_sec: &RelocSection, idx: usize) -> bool {
+    let rela_now = rela_sec.get(idx).expect("Invalid relocation index");
+    for i in 0..idx {
+        let rela_prev = rela_sec.get(i).expect("Invalid relocation index");
+        if is_rela_equal(&rela_now, &rela_prev) {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_rela_equal(rela1: &Reloc, rela2: &Reloc) -> bool {
+    rela1.r_addend == rela2.r_addend && rela1.r_type == rela2.r_type && rela1.r_sym == rela2.r_sym
 }

@@ -5,14 +5,18 @@ use crate::{
     arch::{Ptr, aarch64::insn::*, get_rela_sym_idx, get_rela_type},
     loader::*,
 };
-use goblin::elf::SectionHeader;
+use goblin::elf::{Elf, SectionHeader};
 use int_enum::IntEnum;
+
+#[derive(Debug, Clone, Copy, Default)]
+#[repr(C)]
+pub struct ModuleArchSpecific {}
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, IntEnum, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 /// See <https://github.com/gimli-rs/object/blob/af3ca8a2817c8119e9b6d801bd678a8f1880309d/crates/examples/src/readobj/elf.rs#L2310C1-L2437C3>
-pub enum Aarch64RelocationType {
+pub enum ArchRelocationType {
     // Miscellaneous
     R_ARM_NONE = 0,
     R_AARCH64_NONE = 256,
@@ -58,7 +62,7 @@ pub enum Aarch64RelocationType {
     R_AARCH64_RELATIVE = 1027,
 }
 
-type Arm64RelTy = Aarch64RelocationType;
+type Arm64RelTy = ArchRelocationType;
 
 const fn do_reloc(op: Aarch64RelocOp, location: Ptr, address: u64) -> u64 {
     match op {
@@ -76,7 +80,7 @@ fn is_forbidden_offset_for_adrp(address: u64) -> bool {
     ((address & 0xfff) >= 0xff8) && false
 }
 
-impl Aarch64RelocationType {
+impl ArchRelocationType {
     /// See <https://elixir.bootlin.com/linux/v6.6/source/arch/arm64/kernel/module.c#L177>
     fn reloc_data(
         &self,
@@ -523,10 +527,10 @@ impl Aarch64RelocationType {
     }
 }
 
-pub struct Aarch64ArchRelocate;
+pub struct ArchRelocate;
 
 #[allow(unused_assignments)]
-impl Aarch64ArchRelocate {
+impl ArchRelocate {
     /// See <https://elixir.bootlin.com/linux/v6.6/source/arch/arm64/kernel/module.c#L344>
     pub fn apply_relocate_add<H: KernelModuleHelper>(
         rela_list: &[goblin::elf64::reloc::Rela],
@@ -574,4 +578,11 @@ impl Aarch64ArchRelocate {
         }
         Ok(())
     }
+}
+
+pub fn module_frob_arch_sections<H: KernelModuleHelper>(
+    elf: &mut Elf,
+    owner: &mut ModuleOwner<H>,
+) -> Result<()> {
+    unimplemented!()
 }
