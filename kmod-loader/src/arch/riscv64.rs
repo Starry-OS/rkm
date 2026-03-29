@@ -1,13 +1,20 @@
-use goblin::elf::{Elf, SectionHeader};
+use goblin::elf::{Elf, RelocSection, SectionHeader, SectionHeaders};
 use int_enum::IntEnum;
 
+use super::*;
 use crate::arch::{Ptr, get_rela_sym_idx, get_rela_type};
 use crate::loader::{KernelModuleHelper, ModuleLoadInfo, ModuleOwner};
 use crate::{ModuleErr, Result};
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 #[repr(C)]
-pub struct ModuleArchSpecific {}
+pub struct PltEntry {
+    /// Trampoline code to real target address. The return address
+    /// should be the original (pc+4) before entring plt entry.
+    insn_auipc: u32, /* auipc t0, 0x0      */
+    insn_ld: u32, /* ld    t1, 0x10(t0) */
+    insn_jr: u32, /* jr    t1           */
+}
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, IntEnum, PartialEq, Eq)]
@@ -260,8 +267,8 @@ impl Rv64RelTy {
         // Skip medlow checking because of filtering by HI20 already
 
         let address = address as i32;
-        let hi20 = (address + 0x800) & (0xfffff000_u32 as i32);
-        let lo12 = address - hi20;
+        let hi20 = (address.wrapping_add(0x800)) & (0xfffff000_u32 as i32);
+        let lo12 = address.wrapping_sub(hi20);
         let original_inst = location.read::<u32>();
         location.write((original_inst & 0xfffff) | ((lo12 as u32 & 0xfff) << 20));
         Ok(())
@@ -271,8 +278,8 @@ impl Rv64RelTy {
         // Skip medlow checking because of filtering by HI20 already
 
         let address = address as i32;
-        let hi20 = (address + 0x800) & (0xfffff000_u32 as i32);
-        let lo12 = address - hi20;
+        let hi20 = (address.wrapping_add(0x800)) & (0xfffff000_u32 as i32);
+        let lo12 = address.wrapping_sub(hi20);
         let imm11_5 = (lo12 as u32 & 0xfe0) << (31 - 11);
         let imm4_0 = (lo12 as u32 & 0x1f) << (11 - 4);
         let original_inst = location.read::<u32>();
@@ -281,25 +288,63 @@ impl Rv64RelTy {
     }
 
     /// See <https://elixir.bootlin.com/linux/v6.6/source/arch/riscv/kernel/module.c#L188>
-    fn apply_r_riscv_got_hi20_rela(_location: Ptr, _address: u64) -> Result<()> {
-        unimplemented!("R_RISCV_GOT_HI20 relocation not implemented yet");
-        // Always emit the got entry
-    }
-
-    /// See <https://elixir.bootlin.com/linux/v6.6/source/arch/riscv/kernel/module.c#L210>
-    fn apply_r_riscv_call_plt_rela(location: Ptr, address: u64) -> Result<()> {
-        let offset = address as i64 - location.0 as i64;
-        if !riscv_insn_valid_32bit_offset(offset) {
-            // Only emit the plt entry if offset over 32-bit range
+    fn apply_r_riscv_got_hi20_rela(
+        module: &mut ModuleOwner<impl KernelModuleHelper>,
+        sechdrs: &SectionHeaders,
+        location: Ptr,
+        address: u64,
+    ) -> Result<()> {
+        #[allow(unused_assignments)]
+        let mut offset = address.wrapping_sub(location.0);
+        if cfg!(feature = "module-sections") {
+            // Always emit the got entry
+            let got =
+                module_emit_got_entry(module, sechdrs, address).expect("Failed to emit GOT entry");
+            offset = got as *const GotEntry as u64;
+            offset = offset.wrapping_sub(location.0);
+        } else {
             log::error!(
-                "R_RISCV_CALL_PLT: target {:016x} can not be addressed by the 32-bit offset from PC = {:p}",
+                "{}: can not generate the GOT entry for symbol = {:#x} from PC = {:p}",
+                module.name(),
                 address,
                 location.as_ptr::<u32>()
             );
-            return Err(ModuleErr::ENOEXEC);
+            return Err(ModuleErr::EINVAL);
         }
-        let hi20 = (offset + 0x800) & 0xfffff000;
-        let lo12 = (offset - hi20) & 0xfff;
+
+        let hi20 = offset.wrapping_add(0x800) & 0xfffff000;
+        let original_inst = location.read::<u32>();
+        location.write((original_inst & 0xfff) | (hi20 as u32));
+        Ok(())
+    }
+
+    /// See <https://elixir.bootlin.com/linux/v6.6/source/arch/riscv/kernel/module.c#L210>
+    fn apply_r_riscv_call_plt_rela(
+        module: &mut ModuleOwner<impl KernelModuleHelper>,
+        sechdrs: &SectionHeaders,
+        location: Ptr,
+        address: u64,
+    ) -> Result<()> {
+        #[allow(unused_assignments)]
+        let mut offset = address.wrapping_sub(location.0);
+        if !riscv_insn_valid_32bit_offset(offset as i64) {
+            // Only emit the plt entry if offset over 32-bit range
+            if cfg!(feature = "module-sections") {
+                let plt = module_emit_plt_entry(module, sechdrs, address)
+                    .expect("Failed to emit PLT entry");
+                offset = plt as *const PltEntry as u64;
+                offset = offset.wrapping_sub(location.0);
+            } else {
+                log::error!(
+                    "R_RISCV_CALL_PLT: target {:016x} can not be addressed by the 32-bit offset from PC = {:p}",
+                    address,
+                    location.as_ptr::<u32>()
+                );
+                return Err(ModuleErr::EINVAL);
+            }
+        }
+        let hi20 = (offset.wrapping_add(0x800)) & 0xfffff000;
+        let lo12 = (offset.wrapping_sub(hi20)) & 0xfff;
         let original_auipc = location.read::<u32>();
         location.write((original_auipc & 0xfff) | (hi20 as u32));
         let original_jalr_ptr = location.add(4);
@@ -309,17 +354,17 @@ impl Rv64RelTy {
     }
 
     fn apply_r_riscv_call_rela(location: Ptr, address: u64) -> Result<()> {
-        let offset = address as i64 - location.0 as i64;
-        if !riscv_insn_valid_32bit_offset(offset) {
+        let offset = address.wrapping_sub(location.0);
+        if !riscv_insn_valid_32bit_offset(offset as i64) {
             log::error!(
                 "R_RISCV_CALL: target {:016x} can not be addressed by the 32-bit offset from PC = {:p}",
                 address,
                 location.as_ptr::<u32>()
             );
-            return Err(ModuleErr::ENOEXEC);
+            return Err(ModuleErr::EINVAL);
         }
-        let hi20 = (offset + 0x800) & 0xfffff000;
-        let lo12 = (offset - hi20) & 0xfff;
+        let hi20 = (offset.wrapping_add(0x800)) & 0xfffff000;
+        let lo12 = (offset.wrapping_sub(hi20)) & 0xfff;
         let original_auipc = location.read::<u32>();
         location.write((original_auipc & 0xfff) | (hi20 as u32));
         let original_jalr_ptr = location.add(4);
@@ -376,7 +421,13 @@ impl Rv64RelTy {
         Ok(())
     }
 
-    pub fn apply_relocation(&self, location: u64, address: u64) -> Result<()> {
+    pub fn apply_relocation(
+        &self,
+        module: &mut ModuleOwner<impl KernelModuleHelper>,
+        sechdrs: &SectionHeaders,
+        location: u64,
+        address: u64,
+    ) -> Result<()> {
         let location = Ptr(location);
         match self {
             Rv64RelTy::R_RISCV_32 => Self::apply_r_riscv_32_rela(location, address),
@@ -395,8 +446,12 @@ impl Rv64RelTy {
             Rv64RelTy::R_RISCV_HI20 => Self::apply_r_riscv_hi20_rela(location, address),
             Rv64RelTy::R_RISCV_LO12_I => Self::apply_r_riscv_lo12_i_rela(location, address),
             Rv64RelTy::R_RISCV_LO12_S => Self::apply_r_riscv_lo12_s_rela(location, address),
-            Rv64RelTy::R_RISCV_GOT_HI20 => Self::apply_r_riscv_got_hi20_rela(location, address),
-            Rv64RelTy::R_RISCV_CALL_PLT => Self::apply_r_riscv_call_plt_rela(location, address),
+            Rv64RelTy::R_RISCV_GOT_HI20 => {
+                Self::apply_r_riscv_got_hi20_rela(module, sechdrs, location, address)
+            }
+            Rv64RelTy::R_RISCV_CALL_PLT => {
+                Self::apply_r_riscv_call_plt_rela(module, sechdrs, location, address)
+            }
             Rv64RelTy::R_RISCV_CALL => Self::apply_r_riscv_call_rela(location, address),
             Rv64RelTy::R_RISCV_RELAX => Self::apply_r_riscv_relax_rela(location, address),
             Rv64RelTy::R_RISCV_ALIGN => Self::apply_r_riscv_align_rela(location, address),
@@ -421,16 +476,18 @@ impl ArchRelocate {
     pub fn apply_relocate_add<H: KernelModuleHelper>(
         rela_list: &[goblin::elf64::reloc::Rela],
         rel_section: &SectionHeader,
-        sechdrs: &[SectionHeader],
+        sechdrs: &SectionHeaders,
         load_info: &ModuleLoadInfo,
-        module: &ModuleOwner<H>,
+        module: &mut ModuleOwner<H>,
     ) -> Result<()> {
         for rela in rela_list {
             let rel_type = get_rela_type(rela.r_info);
             let sym_idx = get_rela_sym_idx(rela.r_info);
 
             // This is where to make the change
-            let location = sechdrs[rel_section.sh_info as usize].sh_addr + rela.r_offset;
+            let location = sechdrs[rel_section.sh_info as usize]
+                .sh_addr
+                .wrapping_add(rela.r_offset);
 
             let reloc_type = ArchRelocationType::try_from(rel_type).map_err(|_| {
                 log::error!(
@@ -438,7 +495,7 @@ impl ArchRelocate {
                     module.name(),
                     rel_type
                 );
-                ModuleErr::ENOEXEC
+                ModuleErr::EINVAL
             })?;
 
             let (sym, sym_name) = &load_info.syms[sym_idx];
@@ -451,8 +508,9 @@ impl ArchRelocate {
                 // PC-relative relocation
                 let mut find = false;
                 for inner_rela in rela_list {
-                    let hi20_loc =
-                        sechdrs[rel_section.sh_info as usize].sh_addr + inner_rela.r_offset;
+                    let hi20_loc = sechdrs[rel_section.sh_info as usize]
+                        .sh_addr
+                        .wrapping_add(inner_rela.r_offset);
                     let hi20_type = get_rela_type(inner_rela.r_info);
                     let hi20_type = Rv64RelTy::try_from(hi20_type).map_err(|_| {
                         log::error!(
@@ -461,7 +519,7 @@ impl ArchRelocate {
                             sym_name,
                             hi20_type
                         );
-                        ModuleErr::ENOEXEC
+                        ModuleErr::EINVAL
                     })?;
 
                     // Find the corresponding HI20 relocation entry
@@ -471,25 +529,25 @@ impl ArchRelocate {
                     {
                         let (hi20_sym, _) = load_info.syms[get_rela_sym_idx(inner_rela.r_info)];
 
-                        let hi20_sym_val = hi20_sym.st_value as i64 + inner_rela.r_addend;
+                        let hi20_sym_val =
+                            hi20_sym.st_value.wrapping_add(inner_rela.r_addend as u64);
                         // Calculate lo12
-                        let offset = hi20_sym_val - hi20_loc as i64;
+                        let mut offset = hi20_sym_val.wrapping_sub(hi20_loc);
 
-                        // if (IS_ENABLED(CONFIG_MODULE_SECTIONS)
-                        //     && hi20_type == R_RISCV_GOT_HI20) {
-                        //     offset = module_emit_got_entry(me, hi20_sym_val);
-                        //     offset = offset - hi20_loc;
-                        // }
-
-                        if hi20_type == Rv64RelTy::R_RISCV_GOT_HI20 {
-                            unimplemented!("GOT handling not implemented yet");
+                        if cfg!(feature = "module-sections")
+                            && hi20_type == Rv64RelTy::R_RISCV_GOT_HI20
+                        {
+                            let got = module_emit_got_entry(module, sechdrs, hi20_sym_val)
+                                .expect("Failed to emit GOT entry");
+                            offset = got as *const GotEntry as u64;
+                            offset = offset.wrapping_sub(hi20_loc);
                         }
 
-                        let hi_20 = (offset + 0x800) & 0xfffff000;
-                        let lo_12 = offset - hi_20;
+                        let hi_20 = (offset.wrapping_add(0x800)) & 0xfffff000;
+                        let lo_12 = offset.wrapping_sub(hi_20);
 
                         // update target_addr
-                        target_addr = lo_12 as u64;
+                        target_addr = lo_12;
                         find = true;
                         break;
                     }
@@ -500,10 +558,10 @@ impl ArchRelocate {
                         module.name(),
                         sym_name
                     );
-                    return Err(ModuleErr::ENOEXEC);
+                    return Err(ModuleErr::EINVAL);
                 }
             }
-            let res = reloc_type.apply_relocation(location, target_addr);
+            let res = reloc_type.apply_relocation(module, sechdrs, location, target_addr);
             match res {
                 Err(e) => {
                     log::error!("[{:?}]: ({}) {:?}", module.name(), sym_name, e);
@@ -521,5 +579,77 @@ pub fn module_frob_arch_sections<H: KernelModuleHelper>(
     elf: &mut Elf,
     owner: &mut ModuleOwner<H>,
 ) -> Result<()> {
-    unimplemented!("Section frobbing not implemented yet");
+    common_module_frob_arch_sections(elf, owner, count_max_entries, ".got.plt")
+}
+
+fn count_max_entries(rela_sec: &RelocSection) -> (usize, usize) {
+    let mut plt_entries = 0;
+    let mut got_entries = 0;
+    for (idx, rela) in rela_sec.iter().enumerate() {
+        let rel_type = rela.r_type;
+        let reloc_type = Rv64RelTy::try_from(rel_type).expect("Invalid relocation type");
+        match reloc_type {
+            Rv64RelTy::R_RISCV_CALL_PLT => {
+                if !duplicate_rela(rela_sec, idx) {
+                    plt_entries += 1;
+                }
+            }
+            Rv64RelTy::R_RISCV_GOT_HI20 => {
+                if !duplicate_rela(rela_sec, idx) {
+                    got_entries += 1;
+                }
+            }
+            _ => { /* Other relocation types do not require GOT/PLT entries */ }
+        }
+    }
+    (plt_entries, got_entries)
+}
+
+/// See <https://elixir.bootlin.com/linux/v6.6/source/arch/riscv/kernel/module-sections.c#L13>
+fn module_emit_got_entry(
+    module: &mut ModuleOwner<impl KernelModuleHelper>,
+    sechdrs: &SectionHeaders,
+    address: u64,
+) -> Option<&'static mut GotEntry> {
+    common_module_emit_got_entry(module, sechdrs, address)
+}
+
+/// See <https://elixir.bootlin.com/linux/v6.6/source/arch/riscv/kernel/module-sections.c#L32>
+fn module_emit_plt_entry(
+    module: &mut ModuleOwner<impl KernelModuleHelper>,
+    sechdrs: &SectionHeaders,
+    address: u64,
+) -> Option<&'static mut PltEntry> {
+    common_module_emit_plt_entry(module, sechdrs, address, emit_plt_entry_func)
+}
+
+const OPC_AUIPC: u32 = 0x0017;
+const OPC_LD: u32 = 0x3003;
+const OPC_JALR: u32 = 0x0067;
+const REG_T0: u32 = 0x5;
+const REG_T1: u32 = 0x6;
+
+/// See <https://elixir.bootlin.com/linux/v6.6/source/arch/riscv/include/asm/module.h#L64>
+fn emit_plt_entry_func(_address: u64, plt_entry_addr: u64, plt_idx_entry_addr: u64) -> PltEntry {
+    /*
+     * U-Type encoding:
+     * +------------+----------+----------+
+     * | imm[31:12] | rd[11:7] | opc[6:0] |
+     * +------------+----------+----------+
+     *
+     * I-Type encoding:
+     * +------------+------------+--------+----------+----------+
+     * | imm[31:20] | rs1[19:15] | funct3 | rd[11:7] | opc[6:0] |
+     * +------------+------------+--------+----------+----------+
+     *
+     */
+    // Match C unsigned arithmetic semantics even when overflow checks are enabled.
+    let offset = plt_idx_entry_addr.wrapping_sub(plt_entry_addr);
+    let hi20 = (offset.wrapping_add(0x800) & 0xfffff000) as u32;
+    let lo12 = offset.wrapping_sub(hi20 as u64) as u32;
+    PltEntry {
+        insn_auipc: OPC_AUIPC | (REG_T0 << 7) | hi20,
+        insn_ld: OPC_LD | (lo12 << 20) | (REG_T0 << 15) | (REG_T1 << 7),
+        insn_jr: OPC_JALR | (REG_T1 << 15),
+    }
 }

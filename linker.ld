@@ -30,7 +30,10 @@ SECTIONS
     
     .plt : { BYTE(0) }
 	.got : { BYTE(0) }
+    /* riscv64 */
 	.got.plt : { BYTE(0) }
+    /* loongarch64 */
+    .plt.idx : { BYTE(0) }
 
     /DISCARD/ : {
         *(.comment)

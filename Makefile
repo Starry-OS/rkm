@@ -1,21 +1,3 @@
-# Makefile for building Linux kernel loadable modules
-# =====================================================
-# This Makefile is a translated version of the Rust builder (builder/src/main.rs)
-# 
-# Features:
-#   - Builds Rust kernel modules for specified architectures
-#   - Extracts object files from static libraries
-#   - Links them into relocatable .ko (kernel object) files
-#   - Supports multiple target architectures (x86_64, RISC-V, ARM, etc.)
-#   - Verifies generated kernel modules
-#
-# Build Flow:
-#   1. Compile module crate using cargo (--release, with custom target)
-#   2. Extract object files from generated .a library using rust-ar
-#   3. Link object files using ld with relocation enabled (-r flag)
-#   4. Verify the resulting .ko file with file/readelf commands
-#   5. Clean up temporary object files
-
 # Default values
 
 ARCH ?= riscv64
@@ -23,14 +5,13 @@ RUSTFLAGS :=
 
 ifeq ($(ARCH), x86_64)
   TARGET := x86_64-unknown-none
-  RUSTFLAGS +=  -C code-model=small
 else ifeq ($(ARCH), aarch64)
   TARGET := aarch64-unknown-none-softfloat
 else ifeq ($(ARCH), riscv64)
   TARGET := riscv64gc-unknown-none-elf
 else ifeq ($(ARCH), loongarch64)
   TARGET := loongarch64-unknown-none-softfloat
-  RUSTFLAGS +=  -C code-model=large
+  RUSTFLAGS +=  -C code-model=small
 else
   $(error "ARCH" must be one of "x86_64", "riscv64", "aarch64" or "loongarch64")
 endif
@@ -41,7 +22,6 @@ LINKER_SCRIPT ?= linker.ld
 
 build_args := \
   -Zunstable-options \
-  -Zbuild-std-features=compiler-builtins-mem \
   --release \
   --target $(TARGET)
 

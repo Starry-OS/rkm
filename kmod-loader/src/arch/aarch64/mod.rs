@@ -584,5 +584,5 @@ pub fn module_frob_arch_sections<H: KernelModuleHelper>(
     elf: &mut Elf,
     owner: &mut ModuleOwner<H>,
 ) -> Result<()> {
-    unimplemented!()
+    Ok(())
 }

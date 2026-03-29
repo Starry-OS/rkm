@@ -87,7 +87,6 @@ module!(
 - ELF解析和加载
 - 符号解析和重定位
 - 支持模块参数传递
-- 多架构支持（x86_64、riscv64、aarch64、loongarch64）
 
 ## 🔧 构建系统
 
@@ -120,28 +119,12 @@ Cargo构建 → 提取.rlib → 链接成可重定位ELF (.ko) → 验证
 
 ## 🛠️ 开发指南
 
-### 添加新模块
-
-1. 在`modules/`目录下创建新目录
-2. 添加`Cargo.toml`和`src/lib.rs`
-3. 在根`Cargo.toml`的workspace中添加模块
-4. 使用`make MODULE=your_module`构建
-
-### 模块参数示例
-
-```rust
-use kmod::{module_param, ModuleParam};
-
-static MY_PARAM: ModuleParam<i32> = ModuleParam::new(42);
-
-module_param!(MY_PARAM, "int", 0o644, "My parameter description");
-```
+在使用Rust实现的OS [Starry](https://github.com/Starry-OS/StarryOS) 的kmod分支上查看内核模块的开发示例和编译细节。
 
 ## 🎯 待办事项
 - [ ] 支持更多的重定位类型支持，包括生成plt/got
 - [ ] 完善文档和示例
-- [ ] 改进错误处理机制
-- [ ] 添加单元测试
+- [x] 改进错误处理机制
 - [ ] 支持内核版本兼容性检查
 - [ ] 支持模块签名和验证
 
