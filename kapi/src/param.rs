@@ -112,15 +112,6 @@ macro_rules! impl_macro {
     };
 }
 
-// STANDARD_PARAM_DEF(byte,	unsigned char,		"%hhu",		kstrtou8);
-// STANDARD_PARAM_DEF(short,	short,			"%hi",		kstrtos16);
-// STANDARD_PARAM_DEF(ushort,	unsigned short,		"%hu",		kstrtou16);
-// STANDARD_PARAM_DEF(int,		int,			"%i",		kstrtoint);
-// STANDARD_PARAM_DEF(uint,	unsigned int,		"%u",		kstrtouint);
-// STANDARD_PARAM_DEF(long,	long,			"%li",		kstrtol);
-// STANDARD_PARAM_DEF(ulong,	unsigned long,		"%lu",		kstrtoul);
-// STANDARD_PARAM_DEF(ullong,	unsigned long long,	"%llu",		kstrtoull);
-// STANDARD_PARAM_DEF(hexint,	unsigned int,		"%#08x", 	kstrtouint);
 impl_macro!(byte, c_uchar, "{}\n");
 impl_macro!(short, c_short, "{}\n");
 impl_macro!(ushort, c_ushort, "{}\n");

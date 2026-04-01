@@ -91,6 +91,7 @@ pub struct ModuleOwner<H: KernelModuleHelper> {
     pages: Vec<SectionPages>,
     name: String,
     module: Module,
+    #[allow(unused)]
     pub(crate) arch: ModuleArchSpecific,
     _helper: core::marker::PhantomData<H>,
 }
@@ -515,6 +516,7 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
     /// See <https://elixir.bootlin.com/linux/v6.6/source/kernel/module/main.c#L2363>
     fn layout_and_allocate(&mut self, owner: &mut ModuleOwner<H>) -> Result<()> {
         // Allow arches to frob section contents and sizes
+        #[cfg(feature = "module-sections")]
         crate::arch::module_frob_arch_sections(&mut self.elf, owner)?;
         for shdr in self.elf.section_headers.iter_mut() {
             let sec_name = self

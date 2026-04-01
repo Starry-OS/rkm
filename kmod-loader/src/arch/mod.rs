@@ -288,10 +288,9 @@ mod common {
 
     pub type ArchGotPltCounterFunc = fn(rela_sec: &RelocSection) -> (usize, usize);
 
-    pub fn common_module_frob_arch_sections<H: KernelModuleHelper>(
+    fn check_got_plt<H: KernelModuleHelper>(
         elf: &mut Elf,
         owner: &mut ModuleOwner<H>,
-        got_plt_counter_func: ArchGotPltCounterFunc,
         plt_idx_name: &str,
     ) -> Result<()> {
         let mut got_section_idx = None;
@@ -329,6 +328,15 @@ mod common {
         owner.arch.plt.shndx = plt_section_idx.unwrap();
         owner.arch.plt_idx.shndx = plt_idx_section_idx.unwrap();
 
+        Ok(())
+    }
+
+    pub fn common_module_frob_arch_sections<H: KernelModuleHelper>(
+        elf: &mut Elf,
+        owner: &mut ModuleOwner<H>,
+        got_plt_counter_func: ArchGotPltCounterFunc,
+        plt_idx_name: &str,
+    ) -> Result<()> {
         let mut num_plts = 0;
         let mut num_gots = 0;
         // Calculate the maxinum number of entries
@@ -348,8 +356,20 @@ mod common {
             num_gots += got_entries;
         }
 
+        log::info!(
+            "[{:?}]: Need {} PLT entries and {} GOT entries",
+            owner.name(),
+            num_plts,
+            num_gots
+        );
+        check_got_plt(elf, owner, plt_idx_name)?;
+
+        let got_section_idx = owner.arch.got.shndx;
+        let plt_section_idx = owner.arch.plt.shndx;
+        let plt_idx_section_idx = owner.arch.plt_idx.shndx;
+
         {
-            let got_sec = &mut elf.section_headers[got_section_idx.unwrap()];
+            let got_sec = &mut elf.section_headers[got_section_idx];
             got_sec.sh_type = goblin::elf::section_header::SHT_NOBITS;
             got_sec.sh_flags = goblin::elf::section_header::SHF_ALLOC as u64;
             got_sec.sh_addralign = 64; // TODO: L1_CACHE_BYTES
@@ -359,7 +379,7 @@ mod common {
         }
 
         {
-            let plt_sec = &mut elf.section_headers[plt_section_idx.unwrap()];
+            let plt_sec = &mut elf.section_headers[plt_section_idx];
             plt_sec.sh_type = goblin::elf::section_header::SHT_PROGBITS;
             plt_sec.sh_flags = (goblin::elf::section_header::SHF_ALLOC
                 | goblin::elf::section_header::SHF_EXECINSTR) as u64;
@@ -370,7 +390,7 @@ mod common {
         }
 
         {
-            let plt_idx_sec = &mut elf.section_headers[plt_idx_section_idx.unwrap()];
+            let plt_idx_sec = &mut elf.section_headers[plt_idx_section_idx];
             plt_idx_sec.sh_type = goblin::elf::section_header::SHT_PROGBITS;
             plt_idx_sec.sh_flags = goblin::elf::section_header::SHF_ALLOC as u64;
             plt_idx_sec.sh_addralign = 64;

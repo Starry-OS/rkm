@@ -50,7 +50,7 @@ pub fn exit_fn(_attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// Attribute macro to mark a C API function. It places the function in the
-/// `.c.text` section and applies `no_mangle`.
+/// `.text` section and applies `no_mangle`.
 /// # Example:
 /// ```ignore
 /// #[capi_fn]
@@ -61,14 +61,14 @@ pub fn capi_fn(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let func = parse_macro_input!(item as syn::ItemFn);
     quote! {
         #[unsafe(no_mangle)]
-        #[unsafe(link_section = ".c.text")]
+        #[unsafe(link_section = ".text")]
         #func
     }
     .into()
 }
 
 /// Attribute macro to mark a C static data item. It places the item in the
-/// `.c.data` section and applies `no_mangle` and `used`.
+/// `.data` section and applies `no_mangle` and `used`.
 /// # Example:
 /// ```ignore
 /// #[cdata]
@@ -80,7 +80,7 @@ pub fn cdata(_attr: TokenStream, item: TokenStream) -> TokenStream {
     quote! {
         #[unsafe(no_mangle)]
         #[used]
-        #[unsafe(link_section = ".c.data")]
+        #[unsafe(link_section = ".data")]
         #data
     }
     .into()
