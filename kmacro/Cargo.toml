@@ -8,6 +8,7 @@ homepage.workspace = true
 repository.workspace = true
 documentation = "https://docs.rs/kmacro-tools"
 readme = "README.md"
+description = "Some derived macros for defining module infomation and c functions and c data."
 
 [lib]
 proc-macro = true

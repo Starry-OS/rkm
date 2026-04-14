@@ -8,5 +8,6 @@ homepage.workspace = true
 repository.workspace = true
 documentation = "https://docs.rs/kbindings"
 readme = "README.md"
+description = "FFI bindings for the kernel, generated from the kernel's C headers"
 
 [dependencies]

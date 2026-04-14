@@ -8,6 +8,7 @@ homepage.workspace = true
 repository.workspace = true
 documentation = "https://docs.rs/kmod-tools"
 readme = "README.md"
+description = "Reexported tools for working with kmod macros"
 
 [dependencies]
 kmacro-tools.workspace = true
