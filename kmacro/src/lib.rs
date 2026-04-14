@@ -209,7 +209,7 @@ pub fn module(item: TokenStream) -> TokenStream {
         static MODULE_DESCRIPTION: [u8; #description_len] = [#(#description_array),*];
         #[used]
         #[unsafe(link_section = ".gnu.linkonce.this_module")]
-        static __this_module: kmod::Module = kmod::Module::new(Some(init_module), Some(cleanup_module));
+        static __this_module: kmod_tools::Module = kmod_tools::Module::new(Some(init_module), Some(cleanup_module));
     }
     .into()
 }

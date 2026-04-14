@@ -1,6 +1,12 @@
 [package]
 name = "kbindings"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation = "https://docs.rs/kbindings"
+readme = "README.md"
 
 [dependencies]

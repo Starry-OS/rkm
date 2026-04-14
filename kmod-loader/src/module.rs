@@ -1,6 +1,5 @@
-use core::fmt::Debug;
-
 use alloc::{string::String, vec::Vec};
+use core::fmt::Debug;
 
 #[derive(Clone)]
 pub struct ModuleInfo {

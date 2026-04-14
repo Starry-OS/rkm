@@ -187,6 +187,8 @@ RUSTFLAGS可以用来传递给rustc编译器的选项。解决上述问题的方
 **在loongarch64架构下，`-C link-dead-code`选项必须对kernel的编译和module的编译都生效，否则会导致它们无法共享相同的编译产物。但是其它架构下，`-C link-dead-code`可以只针对kernel的编译生效。**
 
 
+需要注意，即使开启`-C link-dead-code`选项，链接阶段也有可能因为lto移除了一些未使用的符号。与此，需要手动指定`-C lto=no`来禁用lto。
+
 ##  参考链接
 - riscv64架构对plt/got的处理: https://elixir.bootlin.com/linux/v6.6/source/arch/riscv/kernel/module-sections.c#L90
 - https://systemoverlord.com/2017/03/19/got-and-plt-for-pwning.html

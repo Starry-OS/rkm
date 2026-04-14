@@ -1,12 +1,13 @@
 mod insn;
 
+use goblin::elf::{Elf, SectionHeader};
+use int_enum::IntEnum;
+
 use crate::{
     BIT, BIT_U64, ModuleErr, Result,
     arch::{Ptr, aarch64::insn::*, get_rela_sym_idx, get_rela_type},
     loader::*,
 };
-use goblin::elf::{Elf, SectionHeader};
-use int_enum::IntEnum;
 
 #[derive(Debug, Clone, Copy, Default)]
 #[repr(C)]

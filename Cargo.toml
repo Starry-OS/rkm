@@ -8,5 +8,20 @@ members = [
     "modules/hello",
 ]
 
-# exclude = ["modules/hello"]
 resolver = "2"
+
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+authors = ["Godones <chenlinfeng25@outlook.com>"]
+license-file = "LICENSE"
+homepage = "https://github.com/Godones/rkm"
+repository = "https://github.com/Godones/rkm"
+
+
+[workspace.dependencies]
+kmod-tools = { version = "0.2.0", path = "kmod" }
+kmacro-tools = { version = "0.2.0", path = "kmacro" }
+kapi = { version = "0.2.0", path = "kapi" }
+kbindings = { version = "0.2.0", path = "kbindings" }

@@ -1,10 +1,12 @@
-use std::env;
-use std::path::Path;
+use std::{
+    collections::BTreeMap,
+    env, format,
+    path::Path,
+    string::{String, ToString},
+};
 
 use goblin::elf::Elf;
 use kmod_loader::arch::ArchRelocationType;
-use std::string::{String, ToString};
-use std::{collections::BTreeMap, format};
 
 pub struct ElfParser<'a> {
     elf: Elf<'a>,

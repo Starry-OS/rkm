@@ -1,9 +1,11 @@
-use crate::Result;
 use alloc::ffi::CString;
-use axerrno::LinuxError;
 use core::ffi::CStr;
+
+use axerrno::LinuxError;
 use kapi::param::ParamOpsFlags;
-use kmod::KernelParam;
+use kmod_tools::KernelParam;
+
+use crate::Result;
 
 /// Parse a string to get a param value pair.
 /// You can use " around spaces, but can't escape ".
@@ -220,9 +222,9 @@ pub(crate) fn parse_args(
 
 #[cfg(test)]
 mod tests {
+    use alloc::{borrow::ToOwned, boxed::Box};
     use core::ffi::{c_char, c_int};
 
-    use alloc::{borrow::ToOwned, boxed::Box};
     use kapi::param::param_ops_int;
 
     use super::*;

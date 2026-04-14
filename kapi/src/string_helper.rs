@@ -44,9 +44,8 @@ pub unsafe extern "C" fn strim(s: *mut c_char) -> *mut c_char {
 
 #[cfg(test)]
 mod tests {
-    use core::ffi::CStr;
-
     use alloc::ffi::CString;
+    use core::ffi::CStr;
 
     use super::*;
 

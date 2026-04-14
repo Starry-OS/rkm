@@ -1,14 +1,13 @@
 #[macro_use]
 mod inst;
-use crate::arch::loongarch64::inst::*;
-use crate::arch::*;
-use crate::loader::*;
-use crate::{ModuleErr, Result};
-use goblin::elf::Elf;
-use goblin::elf::RelocSection;
-use goblin::elf::SectionHeader;
-use goblin::elf::SectionHeaders;
+use goblin::elf::{Elf, RelocSection, SectionHeader, SectionHeaders};
 use int_enum::IntEnum;
+
+use crate::{
+    ModuleErr, Result,
+    arch::{loongarch64::inst::*, *},
+    loader::*,
+};
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]

@@ -17,6 +17,16 @@
 （支持符号解析、重定位等）
 - **`modules/hello`**: 示例"Hello World"内核模块，展示使用Rust写内核模块基本用法
 
+### 组件之间的关系：
+```
+kmod-loader
+    ├── kmod
+    │   ├── kbindings
+    │   └── kmacro
+    ├── kapi
+        └── kmod
+```
+
 ## 🚀 快速开始
 
 ### 前置要求

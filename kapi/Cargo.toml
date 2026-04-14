@@ -1,16 +1,23 @@
 [package]
 name = "kapi"
-version = "0.1.0"
-edition = "2024"
-description = "Kernel API definitions for kmod-loader"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation = "https://docs.rs/kapi"
+readme = "README.md"
+keywords = ["kernel", "linux", "linux-kernel-api", "lkm", "no-std"]
+description = "Rust implementation of Linux kernel API for loadable kernel module development"
 
 [dependencies]
-kmod = { path = "../kmod" }
+kmod-tools.workspace = true
 axerrno = "0.2"
 paste = "1.0"
 
 
 [features]
-kmem = []
+kmem = ["kstr"]
 kstr = []
 kparameter = []

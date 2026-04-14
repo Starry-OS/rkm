@@ -2,7 +2,8 @@
 extern crate alloc;
 
 use alloc::vec;
-use kmod::{exit_fn, init_fn, module};
+
+use kmod_tools::{exit_fn, init_fn, module};
 
 unsafe extern "C" {
     fn write_char(c: u8);

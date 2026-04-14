@@ -1,15 +1,16 @@
-use crate::{ModuleErr, Result, arch::ModuleArchSpecific, module::ModuleInfo};
-
 use alloc::{
     boxed::Box,
     ffi::CString,
     string::{String, ToString},
     vec::Vec,
 };
-use bitflags::bitflags;
 use core::{ffi::CStr, fmt::Display};
+
+use bitflags::bitflags;
 use goblin::elf::{Elf, SectionHeader};
-use kmod::Module;
+use kmod_tools::Module;
+
+use crate::{ModuleErr, Result, arch::ModuleArchSpecific, module::ModuleInfo};
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -483,9 +484,9 @@ impl<'a, H: KernelModuleHelper> ModuleLoader<'a, H> {
 
     fn find_module_sections(&self, owner: &mut ModuleOwner<H>) -> Result<()> {
         let (num_kparams, kparam_addr) =
-            self.section_objs("__param", size_of::<kmod::kernel_param>())?;
+            self.section_objs("__param", size_of::<kmod_tools::kernel_param>())?;
         let raw_module = owner.module.raw_mod();
-        raw_module.kp = kparam_addr as *mut kmod::kernel_param;
+        raw_module.kp = kparam_addr as *mut kmod_tools::kernel_param;
         raw_module.num_kp = num_kparams as _;
 
         // TODO: implement finding other sections:

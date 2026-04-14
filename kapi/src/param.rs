@@ -1,10 +1,11 @@
-use crate::{ModuleErr, Result};
 use core::ffi::{
     CStr, c_char, c_int, c_long, c_short, c_uchar, c_uint, c_ulong, c_ulonglong, c_ushort, c_void,
 };
-use kmod::capi_fn;
-use kmod::cdata;
+
+use kmod_tools::{capi_fn, cdata};
 use paste::paste;
+
+use crate::{ModuleErr, Result};
 /// Flags available for kernel_param_ops
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,7 +45,10 @@ fn common_parse<T: KernelParamValue>(val: *const c_char) -> Result<T> {
     Ok(v)
 }
 
-fn common_set<T: KernelParamValue>(val: *const c_char, kp: *const kmod::kernel_param) -> c_int {
+fn common_set<T: KernelParamValue>(
+    val: *const c_char,
+    kp: *const kmod_tools::kernel_param,
+) -> c_int {
     let v = match common_parse::<T>(val) {
         Ok(v) => v,
         Err(_) => return -(ModuleErr::EINVAL as c_int),
@@ -85,7 +89,7 @@ macro_rules! impl_macro {
             #[capi_fn]
             unsafe extern "C" fn [<param_set_$name>](
                 val: *const c_char,
-                kp: *const kmod::kernel_param,
+                kp: *const kmod_tools::kernel_param,
             ) -> c_int {
                 common_set::<$name>(val, kp)
             }
@@ -93,7 +97,7 @@ macro_rules! impl_macro {
             #[capi_fn]
             unsafe extern "C" fn [<param_get_$name>](
                 buffer: *mut c_char,
-                kp: *const kmod::kernel_param,
+                kp: *const kmod_tools::kernel_param,
             ) -> c_int {
                 let arg_ptr = unsafe { kp.as_ref().unwrap().__bindgen_anon_1.arg };
                 let v = unsafe { *(arg_ptr as *const $name) };
@@ -102,7 +106,7 @@ macro_rules! impl_macro {
             }
 
             #[cdata]
-            pub static [<param_ops_$name>]: kmod::kernel_param_ops = kmod::kernel_param_ops {
+            pub static [<param_ops_$name>]: kmod_tools::kernel_param_ops = kmod_tools::kernel_param_ops {
                 set: Some([<param_set_$name>]),
                 get: Some([<param_get_$name>]),
                 flags: 0,
@@ -174,7 +178,10 @@ impl KernelParamValue for charp {
     }
 }
 
-unsafe extern "C" fn param_set_charp(val: *const c_char, kp: *const kmod::kernel_param) -> c_int {
+unsafe extern "C" fn param_set_charp(
+    val: *const c_char,
+    kp: *const kmod_tools::kernel_param,
+) -> c_int {
     let v = common_parse::<charp>(val);
     let v = match v {
         Ok(v) => v,
@@ -194,7 +201,10 @@ unsafe extern "C" fn param_set_charp(val: *const c_char, kp: *const kmod::kernel
     0
 }
 
-unsafe extern "C" fn param_get_charp(buffer: *mut c_char, kp: *const kmod::kernel_param) -> c_int {
+unsafe extern "C" fn param_get_charp(
+    buffer: *mut c_char,
+    kp: *const kmod_tools::kernel_param,
+) -> c_int {
     let arg_ptr = unsafe { kp.as_ref().unwrap().__bindgen_anon_1.arg };
     let v = unsafe { *(arg_ptr as *const charp) };
     let len = v.format(buffer as _).unwrap_or(0);
@@ -206,7 +216,7 @@ unsafe extern "C" fn param_free_charp(arg: *mut c_void) {
 }
 
 #[cdata]
-pub static param_ops_charp: kmod::kernel_param_ops = kmod::kernel_param_ops {
+pub static param_ops_charp: kmod_tools::kernel_param_ops = kmod_tools::kernel_param_ops {
     set: Some(param_set_charp),
     get: Some(param_get_charp),
     flags: 0,
@@ -235,7 +245,10 @@ impl KernelParamValue for bool {
     }
 }
 
-unsafe extern "C" fn param_set_bool(val: *const c_char, kp: *const kmod::kernel_param) -> c_int {
+unsafe extern "C" fn param_set_bool(
+    val: *const c_char,
+    kp: *const kmod_tools::kernel_param,
+) -> c_int {
     let val = if val.is_null() {
         c"".as_ptr() // No argument means "set"
     } else {
@@ -244,7 +257,10 @@ unsafe extern "C" fn param_set_bool(val: *const c_char, kp: *const kmod::kernel_
     common_set::<bool>(val, kp)
 }
 
-unsafe extern "C" fn param_get_bool(buffer: *mut c_char, kp: *const kmod::kernel_param) -> c_int {
+unsafe extern "C" fn param_get_bool(
+    buffer: *mut c_char,
+    kp: *const kmod_tools::kernel_param,
+) -> c_int {
     let arg_ptr = unsafe { kp.as_ref().unwrap().__bindgen_anon_1.arg };
     let v = unsafe { *(arg_ptr as *const bool) };
     let len = v.format(buffer as _).unwrap_or(0);
@@ -252,7 +268,7 @@ unsafe extern "C" fn param_get_bool(buffer: *mut c_char, kp: *const kmod::kernel
 }
 
 #[cdata]
-pub static param_ops_bool: kmod::kernel_param_ops = kmod::kernel_param_ops {
+pub static param_ops_bool: kmod_tools::kernel_param_ops = kmod_tools::kernel_param_ops {
     set: Some(param_set_bool),
     get: Some(param_get_bool),
     flags: ParamOpsFlags::KERNEL_PARAM_OPS_FL_NOARG as u32,

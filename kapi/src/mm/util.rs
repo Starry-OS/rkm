@@ -1,6 +1,6 @@
+use alloc::vec::Vec;
 use core::ffi::c_char;
 
-use alloc::vec::Vec;
 use kmod::capi_fn;
 
 /// kstrndup - allocate space for and copy an existing string

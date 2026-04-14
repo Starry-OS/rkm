@@ -1,7 +1,15 @@
 [package]
 name = "kmod-loader"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation = "https://docs.rs/kmod-loader"
+readme = "README.md"
+keywords = ["kernel", "linux", "linux-kernel-module-loader", "lkm", "no-std"]
+description = "Rust implementation of Linux kernel module loader for loadable kernel module development"
 
 [dependencies]
 goblin = { version = "0.10", default-features = false, features = [
@@ -12,12 +20,12 @@ goblin = { version = "0.10", default-features = false, features = [
 int-enum = "1.2.0"
 bitflags = "2.10"
 log = "0.4"
-bitfield-struct = "0.12"
+bitfield-struct = "0.13"
 axerrno = "0.2"
-kmod = { path = "../kmod" }
-kapi = { path = "../kapi", features = ["kparameter"] }
 cfg-if = "1.0"
 paste = "1.0"
+kmod-tools.workspace = true
+kapi = { workspace = true, features = ["kparameter"] }
 
 [features]
 default = ["module-sections"]

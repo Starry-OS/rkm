@@ -1,7 +1,6 @@
+use std::{env, ffi::CString, path::Path};
+
 use kmod_loader::{KernelModuleHelper, ModuleLoader, SectionMemOps, SectionPerm};
-use std::env;
-use std::ffi::CString;
-use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::builder()

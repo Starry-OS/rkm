@@ -1,9 +1,11 @@
 use goblin::elf::{Elf, SectionHeader};
 use int_enum::IntEnum;
 
-use crate::arch::{Ptr, get_rela_sym_idx, get_rela_type};
-use crate::loader::{KernelModuleHelper, ModuleLoadInfo, ModuleOwner};
-use crate::{ModuleErr, Result};
+use crate::{
+    ModuleErr, Result,
+    arch::{Ptr, get_rela_sym_idx, get_rela_type},
+    loader::{KernelModuleHelper, ModuleLoadInfo, ModuleOwner},
+};
 
 #[derive(Debug, Clone, Copy, Default)]
 #[repr(C)]

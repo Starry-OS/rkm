@@ -1,4 +1,5 @@
 use core::ffi::CStr;
+
 pub use kbindings::{kernel_param, kernel_param_ops};
 /// The `KernelParam` struct represents a kernel module parameter.
 ///

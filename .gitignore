@@ -2,3 +2,4 @@
 Cargo.lock
 *.ko
 kernel
+.codex
