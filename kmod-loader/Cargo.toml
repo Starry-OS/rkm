@@ -8,7 +8,7 @@ homepage.workspace = true
 repository.workspace = true
 documentation = "https://docs.rs/kmod-loader"
 readme = "README.md"
-keywords = ["kernel", "linux", "linux-kernel-module-loader", "lkm", "no-std"]
+keywords = ["kernel", "linux", "lkm-loader", "lkm", "no-std"]
 description = "Rust implementation of Linux kernel module loader for loadable kernel module development"
 
 [dependencies]
