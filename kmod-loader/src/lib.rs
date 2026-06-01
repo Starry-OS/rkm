@@ -6,7 +6,7 @@ mod module;
 mod param;
 extern crate alloc;
 pub use arch::ArchRelocationType;
-use axerrno::{LinuxError, LinuxResult};
+use ax_errno::{LinuxError, LinuxResult};
 pub use loader::{KernelModuleHelper, ModuleLoader, ModuleOwner, SectionMemOps, SectionPerm};
 #[doc(hidden)]
 pub use paste;

@@ -1,7 +1,7 @@
 use alloc::ffi::CString;
 use core::ffi::CStr;
 
-use axerrno::LinuxError;
+use ax_errno::LinuxError;
 use kapi::param::ParamOpsFlags;
 use kmod_tools::KernelParam;
 
