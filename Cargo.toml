@@ -12,7 +12,7 @@ resolver = "2"
 
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["Godones <chenlinfeng25@outlook.com>"]
 license-file = "LICENSE"
@@ -21,7 +21,7 @@ repository = "https://github.com/Godones/rkm"
 
 
 [workspace.dependencies]
-kmod-tools = { version = "0.2.0", path = "kmod" }
-kmacro-tools = { version = "0.2.0", path = "kmacro" }
-kapi = { version = "0.2.0", path = "kapi" }
-kbindings = { version = "0.2.0", path = "kbindings" }
+kmod-tools = { version = "0.3.0", path = "kmod" }
+kmacro-tools = { version = "0.3.0", path = "kmacro" }
+kapi = { version = "0.3.0", path = "kapi" }
+kbindings = { version = "0.3.0", path = "kbindings" }
