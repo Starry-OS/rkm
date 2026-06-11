@@ -1,6 +1,6 @@
 //! Macro definitions for kernel module functions.
 use proc_macro::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::{
     Ident, LitStr, Token,
     parse::{Parse, ParseStream},
@@ -59,10 +59,40 @@ pub fn exit_fn(_attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn capi_fn(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let func = parse_macro_input!(item as syn::ItemFn);
+    let func_name = &func.sig.ident;
+    let anchor_name = format_ident!("__kmod_export_anchor_{}", func_name);
+    let section_name = format!(".kmod_export.{}", func_name);
+    let unsafety = &func.sig.unsafety;
+    let abi = &func.sig.abi;
+    let output = &func.sig.output;
+
+    let mut input_types = Vec::new();
+    for input in &func.sig.inputs {
+        let syn::FnArg::Typed(input) = input else {
+            return syn::Error::new_spanned(input, "#[capi_fn] does not support methods")
+                .to_compile_error()
+                .into();
+        };
+        let ty = &input.ty;
+        input_types.push(quote! { #ty });
+    }
+
+    let fn_args = if func.sig.variadic.is_some() {
+        quote! { #(#input_types),*, ... }
+    } else {
+        quote! { #(#input_types),* }
+    };
+    let fn_ptr_type = quote! { #unsafety #abi fn(#fn_args) #output };
+
     quote! {
         #[unsafe(no_mangle)]
         #[unsafe(link_section = ".text")]
         #func
+
+        #[used]
+        #[unsafe(link_section = #section_name)]
+        #[allow(non_upper_case_globals)]
+        static #anchor_name: #fn_ptr_type = #func_name;
     }
     .into()
 }
@@ -80,7 +110,7 @@ pub fn cdata(_attr: TokenStream, item: TokenStream) -> TokenStream {
     quote! {
         #[unsafe(no_mangle)]
         #[used]
-        #[unsafe(link_section = ".data")]
+        #[unsafe(link_section = ".kmod_export.data")]
         #data
     }
     .into()

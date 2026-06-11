@@ -31,6 +31,10 @@ macro_rules! ADDR_IMM {
     };
 }
 
+const fn field_bits(value: i32, bits: u32) -> u32 {
+    (value as u32) & ((1u32 << bits) - 1)
+}
+
 #[repr(u32)]
 #[derive(Debug, Clone, Copy)]
 pub enum loongarch_gpr {
@@ -275,7 +279,9 @@ macro_rules! DEF_EMIT_REG1I20_FORMAT {
                 let mut insn = reg1i20_format::new();
                 insn.set_opcode(reg1i20_op::$opcode as u32);
                 insn.set_rd(rd as u32);
-                insn.set_immediate(imm as u32);
+                // Linux writes to a 20-bit C bitfield; keep the same low-bit truncation.
+                // https://codebrowser.dev/linux/linux/arch/loongarch/include/asm/inst.h.html#556
+                insn.set_immediate(field_bits(imm, 20));
                 insn.into()
             }
         }
@@ -294,7 +300,9 @@ macro_rules! DEF_EMIT_REG2I12_FORMAT {
                 insn.set_opcode(reg2i12_op::$opcode as u32);
                 insn.set_rd(rd as u32);
                 insn.set_rj(rj as u32);
-                insn.set_immediate(imm as u32);
+                // Linux writes to a 12-bit C bitfield; keep the same low-bit truncation.
+                // https://codebrowser.dev/linux/linux/arch/loongarch/include/asm/inst.h.html#617
+                insn.set_immediate(field_bits(imm, 12));
                 insn.into()
             }
         }
@@ -324,7 +332,9 @@ macro_rules! DEF_EMIT_REG2I16_FORMAT {
                 insn.set_opcode(reg2i16_op::$opcode as u32);
                 insn.set_rd(rd as u32);
                 insn.set_rj(rj as u32);
-                insn.set_immediate(offset as u32);
+                // Linux writes to a 16-bit C bitfield; keep the same low-bit truncation.
+                // https://codebrowser.dev/linux/linux/arch/loongarch/include/asm/inst.h.html#668
+                insn.set_immediate(field_bits(offset, 16));
                 insn.into()
             }
         }

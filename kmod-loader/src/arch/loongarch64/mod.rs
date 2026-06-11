@@ -336,9 +336,11 @@ impl ArchRelocationType {
         }
         let got = got.unwrap();
 
+        // Match Linux's GOT_PC dispatch to PCALA relocations:
+        // https://codebrowser.dev/linux/linux/arch/loongarch/kernel/module.c.html#399
         let new_ty = match self {
-            LaRelTy::R_LARCH_GOT_PC_HI20 => LaRelTy::R_LARCH_PCALA_LO12,
-            LaRelTy::R_LARCH_GOT_PC_LO12 => LaRelTy::R_LARCH_PCALA_HI20,
+            LaRelTy::R_LARCH_GOT_PC_LO12 => LaRelTy::R_LARCH_PCALA_LO12,
+            LaRelTy::R_LARCH_GOT_PC_HI20 => LaRelTy::R_LARCH_PCALA_HI20,
             _ => {
                 log::error!("{}: Unsupport relocation type: {:?}", module.name(), self);
                 return Err(ModuleErr::EINVAL);
@@ -481,6 +483,16 @@ impl ArchRelocationType {
 
         let inst = location.read::<u32>();
         match *self {
+            LaRelTy::R_LARCH_SOP_POP_32_S_10_5 => {
+                if !signed_imm_check(opr1, 5) {
+                    return Err(overflow());
+                }
+                // https://codebrowser.dev/linux/linux/arch/loongarch/kernel/module.c.html#183
+                let mut inst = reg2i5_format::from_bits(inst);
+                inst.set_immediate(opr1 as u32 & 0x1F);
+                location.write::<u32>(inst.into_bits());
+                Ok(())
+            }
             LaRelTy::R_LARCH_SOP_POP_32_U_10_12 => {
                 if !unsigned_imm_check(opr1 as u64, 12) {
                     return Err(overflow());
@@ -514,10 +526,37 @@ impl ArchRelocationType {
                 if opr1 % 4 != 0 {
                     return Err(unaligned());
                 }
+                if !signed_imm_check(opr1, 18) {
+                    return Err(overflow());
+                }
+                opr1 >>= 2;
+                // https://codebrowser.dev/linux/linux/arch/loongarch/kernel/module.c.html#214
+                let mut inst = reg2i16_format::from_bits(inst);
+                inst.set_immediate(opr1 as u32 & 0xFFFF);
+                location.write::<u32>(inst.into_bits());
+                Ok(())
+            }
+
+            LaRelTy::R_LARCH_SOP_POP_32_S_5_20 => {
+                if !signed_imm_check(opr1, 20) {
+                    return Err(overflow());
+                }
+                // https://codebrowser.dev/linux/linux/arch/loongarch/kernel/module.c.html#223
+                let mut inst = reg1i20_format::from_bits(inst);
+                inst.set_immediate(opr1 as u32 & 0xFFFFF);
+                location.write::<u32>(inst.into_bits());
+                Ok(())
+            }
+
+            LaRelTy::R_LARCH_SOP_POP_32_S_0_5_10_16_S2 => {
+                if opr1 % 4 != 0 {
+                    return Err(unaligned());
+                }
                 if !signed_imm_check(opr1, 23) {
                     return Err(overflow());
                 }
                 opr1 >>= 2;
+                // https://codebrowser.dev/linux/linux/arch/loongarch/kernel/module.c.html#229
                 let mut inst = reg1i21_format::from_bits(inst);
                 inst.set_immediate_l(opr1 as u32 & 0xFFFF);
                 inst.set_immediate_h(((opr1 as u32) >> 16) & 0x1F);

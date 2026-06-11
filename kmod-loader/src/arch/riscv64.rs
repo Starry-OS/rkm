@@ -130,6 +130,14 @@ pub enum ArchRelocationType {
     R_RISCV_SET16 = 55,
     /// Local label subtraction
     R_RISCV_SET32 = 56,
+    /// 32-bit PC-relative relocation: word32 = S + A - P
+    R_RISCV_32_PCREL = 57,
+    /// 32-bit PLT-relative relocation
+    R_RISCV_PLT32 = 59,
+    /// ULEB128 relocation pair start
+    R_RISCV_SET_ULEB128 = 60,
+    /// ULEB128 relocation pair subtraction
+    R_RISCV_SUB_ULEB128 = 61,
 }
 
 /// The auipc+jalr instruction pair can reach any PC-relative offset
@@ -393,6 +401,13 @@ impl Rv64RelTy {
         Ok(())
     }
 
+    /// See <https://codebrowser.dev/linux/linux/arch/riscv/kernel/module.c.html#328>
+    fn apply_r_riscv_add8_rela(location: Ptr, address: u64) -> Result<()> {
+        let value = location.read::<u8>();
+        location.write(value.wrapping_add(address as u8));
+        Ok(())
+    }
+
     fn apply_r_riscv_add32_rela(location: Ptr, address: u64) -> Result<()> {
         let value = location.read::<u32>();
         location.write(value.wrapping_add(address as u32));
@@ -411,6 +426,20 @@ impl Rv64RelTy {
         Ok(())
     }
 
+    /// See <https://codebrowser.dev/linux/linux/arch/riscv/kernel/module.c.html#349>
+    fn apply_r_riscv_sub8_rela(location: Ptr, address: u64) -> Result<()> {
+        let value = location.read::<u8>();
+        location.write(value.wrapping_sub(address as u8));
+        Ok(())
+    }
+
+    /// See <https://codebrowser.dev/linux/linux/arch/riscv/kernel/module.c.html#370>
+    fn apply_r_riscv_sub6_rela(location: Ptr, address: u64) -> Result<()> {
+        let value = location.read::<u8>();
+        location.write((value.wrapping_sub(address as u8 & 0x3f)) & 0x3f);
+        Ok(())
+    }
+
     fn apply_r_riscv_sub32_rela(location: Ptr, address: u64) -> Result<()> {
         let value = location.read::<u32>();
         location.write(value.wrapping_sub(address as u32));
@@ -420,6 +449,63 @@ impl Rv64RelTy {
     fn apply_r_riscv_sub64_rela(location: Ptr, address: u64) -> Result<()> {
         let value = location.read::<u64>();
         location.write(value.wrapping_sub(address));
+        Ok(())
+    }
+
+    /// See <https://codebrowser.dev/linux/linux/arch/riscv/kernel/module.c.html#379>
+    fn apply_r_riscv_set6_rela(location: Ptr, address: u64) -> Result<()> {
+        let value = location.read::<u8>();
+        location.write((value & 0xc0) | (address as u8 & 0x3f));
+        Ok(())
+    }
+
+    /// See <https://codebrowser.dev/linux/linux/arch/riscv/kernel/module.c.html#388>
+    fn apply_r_riscv_set8_rela(location: Ptr, address: u64) -> Result<()> {
+        location.write(address as u8);
+        Ok(())
+    }
+
+    /// See <https://codebrowser.dev/linux/linux/arch/riscv/kernel/module.c.html#394>
+    fn apply_r_riscv_set16_rela(location: Ptr, address: u64) -> Result<()> {
+        location.write(address as u16);
+        Ok(())
+    }
+
+    /// See <https://codebrowser.dev/linux/linux/arch/riscv/kernel/module.c.html#401>
+    fn apply_r_riscv_set32_rela(location: Ptr, address: u64) -> Result<()> {
+        location.write(address as u32);
+        Ok(())
+    }
+
+    /// See <https://codebrowser.dev/linux/linux/arch/riscv/kernel/module.c.html#408>
+    fn apply_r_riscv_32_pcrel_rela(location: Ptr, address: u64) -> Result<()> {
+        location.write(address.wrapping_sub(location.0) as u32);
+        Ok(())
+    }
+
+    /// See <https://codebrowser.dev/linux/linux/arch/riscv/kernel/module.c.html#415>
+    fn apply_r_riscv_plt32_rela(
+        module: &mut ModuleOwner<impl KernelModuleHelper>,
+        sechdrs: &SectionHeaders,
+        location: Ptr,
+        address: u64,
+    ) -> Result<()> {
+        let mut offset = address.wrapping_sub(location.0);
+        if !riscv_insn_valid_32bit_offset(offset as i64) {
+            if cfg!(feature = "module-sections") {
+                let plt = module_emit_plt_entry(module, sechdrs, address)
+                    .expect("Failed to emit PLT entry");
+                offset = (plt as *const PltEntry as u64).wrapping_sub(location.0);
+            } else {
+                log::error!(
+                    "R_RISCV_PLT32: target {:016x} can not be addressed by the 32-bit offset from PC = {:p}",
+                    address,
+                    location.as_ptr::<u32>()
+                );
+                return Err(ModuleErr::EINVAL);
+            }
+        }
+        location.write(offset as u32);
         Ok(())
     }
 
@@ -457,13 +543,27 @@ impl Rv64RelTy {
             Rv64RelTy::R_RISCV_CALL => Self::apply_r_riscv_call_rela(location, address),
             Rv64RelTy::R_RISCV_RELAX => Self::apply_r_riscv_relax_rela(location, address),
             Rv64RelTy::R_RISCV_ALIGN => Self::apply_r_riscv_align_rela(location, address),
+            Rv64RelTy::R_RISCV_ADD8 => Self::apply_r_riscv_add8_rela(location, address),
             Rv64RelTy::R_RISCV_ADD16 => Self::apply_r_riscv_add16_rela(location, address),
             Rv64RelTy::R_RISCV_ADD32 => Self::apply_r_riscv_add32_rela(location, address),
             Rv64RelTy::R_RISCV_ADD64 => Self::apply_r_riscv_add64_rela(location, address),
+            Rv64RelTy::R_RISCV_SUB8 => Self::apply_r_riscv_sub8_rela(location, address),
             Rv64RelTy::R_RISCV_SUB16 => Self::apply_r_riscv_sub16_rela(location, address),
             Rv64RelTy::R_RISCV_SUB32 => Self::apply_r_riscv_sub32_rela(location, address),
             Rv64RelTy::R_RISCV_SUB64 => Self::apply_r_riscv_sub64_rela(location, address),
-            _ => unimplemented!("RISC-V relocation application not implemented yet"),
+            Rv64RelTy::R_RISCV_SUB6 => Self::apply_r_riscv_sub6_rela(location, address),
+            Rv64RelTy::R_RISCV_SET6 => Self::apply_r_riscv_set6_rela(location, address),
+            Rv64RelTy::R_RISCV_SET8 => Self::apply_r_riscv_set8_rela(location, address),
+            Rv64RelTy::R_RISCV_SET16 => Self::apply_r_riscv_set16_rela(location, address),
+            Rv64RelTy::R_RISCV_SET32 => Self::apply_r_riscv_set32_rela(location, address),
+            Rv64RelTy::R_RISCV_32_PCREL => Self::apply_r_riscv_32_pcrel_rela(location, address),
+            Rv64RelTy::R_RISCV_PLT32 => {
+                Self::apply_r_riscv_plt32_rela(module, sechdrs, location, address)
+            }
+            _ => {
+                log::error!("RISC-V relocation {:?} not implemented yet", self);
+                Err(ModuleErr::ENOEXEC)
+            }
         }
     }
 }
@@ -592,6 +692,11 @@ fn count_max_entries(rela_sec: &RelocSection) -> (usize, usize) {
         let reloc_type = Rv64RelTy::try_from(rel_type).expect("Invalid relocation type");
         match reloc_type {
             Rv64RelTy::R_RISCV_CALL_PLT => {
+                if !duplicate_rela(rela_sec, idx) {
+                    plt_entries += 1;
+                }
+            }
+            Rv64RelTy::R_RISCV_PLT32 => {
                 if !duplicate_rela(rela_sec, idx) {
                     plt_entries += 1;
                 }

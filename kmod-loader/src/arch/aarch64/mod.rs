@@ -1,6 +1,6 @@
 mod insn;
 
-use goblin::elf::{Elf, SectionHeader};
+use goblin::elf::{Elf, RelocSection, SectionHeader};
 use int_enum::IntEnum;
 
 use crate::{
@@ -9,9 +9,27 @@ use crate::{
     loader::*,
 };
 
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct PltEntry {
+    adrp: u32,
+    add: u32,
+    br: u32,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 #[repr(C)]
-pub struct ModuleArchSpecific {}
+struct ModPltSec {
+    shndx: usize,
+    num_entries: usize,
+    max_entries: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+#[repr(C)]
+pub struct ModuleArchSpecific {
+    plt: ModPltSec,
+}
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, IntEnum, PartialEq, Eq)]
@@ -72,6 +90,67 @@ const fn do_reloc(op: Aarch64RelocOp, location: Ptr, address: u64) -> u64 {
         Aarch64RelocOp::RELOC_OP_PAGE => (address & !0xfff).wrapping_sub(location.0 & !0xfff),
         Aarch64RelocOp::RELOC_OP_NONE => 0,
     }
+}
+
+const AARCH64_INSN_ADRP: u32 = 0x9000_0000;
+const AARCH64_INSN_ADD_IMM_64: u32 = 0x9100_0000;
+const AARCH64_INSN_BR: u32 = 0xd61f_0000;
+const AARCH64_REG_IP0: u32 = 16;
+
+const fn signed_imm_check(value: i128, bits: u32) -> bool {
+    value >= -(1i128 << (bits - 1)) && value < (1i128 << (bits - 1))
+}
+
+fn emit_plt_entry(address: u64, plt_entry_addr: u64) -> Result<PltEntry> {
+    let target_page = (address & !0xfff) as i64 as i128;
+    let plt_page = (plt_entry_addr & !0xfff) as i64 as i128;
+    let page_delta = (target_page - plt_page) >> 12;
+
+    if !signed_imm_check(page_delta, 21) {
+        log::error!(
+            "AArch64 PLT target {:#x} is out of ADRP range from PLT entry {:#x}",
+            address,
+            plt_entry_addr
+        );
+        return Err(ModuleErr::ENOEXEC);
+    }
+
+    let imm = (page_delta as u32) & ((1 << 21) - 1);
+    let immlo = imm & 0x3;
+    let immhi = (imm >> 2) & 0x7ffff;
+    let adrp = AARCH64_INSN_ADRP | (immlo << 29) | (immhi << 5) | AARCH64_REG_IP0;
+    let add = AARCH64_INSN_ADD_IMM_64
+        | (((address & 0xfff) as u32) << 10)
+        | (AARCH64_REG_IP0 << 5)
+        | AARCH64_REG_IP0;
+    let br = AARCH64_INSN_BR | (AARCH64_REG_IP0 << 5);
+
+    Ok(PltEntry { adrp, add, br })
+}
+
+/// See <https://codebrowser.dev/linux/linux/arch/arm64/kernel/module-plts.c.html#69>
+fn module_emit_plt_entry(
+    module: &mut ModuleOwner<impl KernelModuleHelper>,
+    sechdrs: &[SectionHeader],
+    address: u64,
+) -> Result<&'static mut PltEntry> {
+    if module.arch.plt.num_entries >= module.arch.plt.max_entries {
+        log::error!("{}: too many PLT entries", module.name());
+        return Err(ModuleErr::ENOEXEC);
+    }
+
+    let plt_sec = &mut module.arch.plt;
+    let idx = plt_sec.num_entries;
+    let plt_entries_addr = sechdrs[plt_sec.shndx].sh_addr;
+    let plt_entries = unsafe {
+        core::slice::from_raw_parts_mut(plt_entries_addr as *mut PltEntry, plt_sec.max_entries)
+    };
+    let plt_entry_addr = &plt_entries[idx] as *const PltEntry as u64;
+
+    plt_entries[idx] = emit_plt_entry(address, plt_entry_addr)?;
+    plt_sec.num_entries += 1;
+
+    Ok(&mut plt_entries[idx])
 }
 
 /// TODO: Implement the function
@@ -253,7 +332,13 @@ impl ArchRelocationType {
         }
     }
 
-    fn apply_relocation(&self, location: u64, address: u64) -> Result<()> {
+    fn apply_relocation(
+        &self,
+        module: &mut ModuleOwner<impl KernelModuleHelper>,
+        sechdrs: &[SectionHeader],
+        location: u64,
+        address: u64,
+    ) -> Result<()> {
         // Check for overflow by default.
         let mut check_overflow = true;
         let location = Ptr(location);
@@ -499,7 +584,7 @@ impl ArchRelocationType {
                 Aarch64InsnImmType::AARCH64_INSN_IMM_19,
             )?,
             Arm64RelTy::R_AARCH64_JUMP26 | Arm64RelTy::R_AARCH64_CALL26 => {
-                let ovf = self.reloc_insn_imm(
+                let mut ovf = self.reloc_insn_imm(
                     Aarch64RelocOp::RELOC_OP_PREL,
                     location,
                     address,
@@ -508,10 +593,18 @@ impl ArchRelocationType {
                     Aarch64InsnImmType::AARCH64_INSN_IMM_26,
                 )?;
                 if ovf {
-                    // TODO: address = module_emit_plt_entry()
-                    unimplemented!(
-                        "Veneer emission for out-of-range AArch64 JUMP26/CALL26 not implemented"
-                    );
+                    // Linux emits a PLT entry and retries this relocation here.
+                    // https://codebrowser.dev/linux/linux/arch/arm64/kernel/module.c.html#415
+                    let plt = module_emit_plt_entry(module, sechdrs, address)?;
+                    let plt_addr = plt as *const PltEntry as u64;
+                    ovf = self.reloc_insn_imm(
+                        Aarch64RelocOp::RELOC_OP_PREL,
+                        location,
+                        plt_addr,
+                        2,
+                        26,
+                        Aarch64InsnImmType::AARCH64_INSN_IMM_26,
+                    )?;
                 }
                 ovf
             }
@@ -538,7 +631,7 @@ impl ArchRelocate {
         rel_section: &SectionHeader,
         sechdrs: &[SectionHeader],
         load_info: &ModuleLoadInfo,
-        module: &ModuleOwner<H>,
+        module: &mut ModuleOwner<H>,
     ) -> Result<()> {
         for rela in rela_list {
             let rel_type = get_rela_type(rela.r_info);
@@ -568,7 +661,7 @@ impl ArchRelocate {
                 target_addr
             );
 
-            let res = reloc_type.apply_relocation(location, target_addr);
+            let res = reloc_type.apply_relocation(module, sechdrs, location, target_addr);
             match res {
                 Err(e) => {
                     log::error!("[{:?}]: ({}) {:?}", module.name(), sym_name, e);
@@ -585,5 +678,64 @@ pub fn module_frob_arch_sections<H: KernelModuleHelper>(
     elf: &mut Elf,
     owner: &mut ModuleOwner<H>,
 ) -> Result<()> {
+    let mut num_plts = 0usize;
+
+    for (idx, rela_sec) in elf.shdr_relocs.iter() {
+        let shdr = &elf.section_headers[*idx];
+        if shdr.sh_type != goblin::elf::section_header::SHT_RELA {
+            continue;
+        }
+
+        let to_section = &elf.section_headers[shdr.sh_info as usize];
+        if to_section.sh_flags & goblin::elf::section_header::SHF_EXECINSTR as u64 == 0 {
+            continue;
+        }
+
+        num_plts += count_plts(rela_sec);
+    }
+
+    if num_plts == 0 {
+        return Ok(());
+    }
+
+    let mut plt_section_idx = None;
+    for (idx, shdr) in elf.section_headers.iter().enumerate() {
+        let sec_name = elf.shdr_strtab.get_at(shdr.sh_name).unwrap_or("<unknown>");
+        if sec_name == ".plt" {
+            plt_section_idx = Some(idx);
+            break;
+        }
+    }
+
+    let Some(plt_section_idx) = plt_section_idx else {
+        log::error!("{:?}: module .PLT section missing", owner.name());
+        return Err(ModuleErr::ENOEXEC);
+    };
+
+    // Linux reserves module PLT entries before final layout.
+    // https://codebrowser.dev/linux/linux/arch/arm64/kernel/module-plts.c.html#337
+    let plt_sec = &mut elf.section_headers[plt_section_idx];
+    plt_sec.sh_type = goblin::elf::section_header::SHT_PROGBITS;
+    plt_sec.sh_flags = (goblin::elf::section_header::SHF_ALLOC
+        | goblin::elf::section_header::SHF_EXECINSTR) as u64;
+    plt_sec.sh_addralign = 4;
+    plt_sec.sh_size = (num_plts * core::mem::size_of::<PltEntry>()) as u64;
+
+    owner.arch.plt.shndx = plt_section_idx;
+    owner.arch.plt.num_entries = 0;
+    owner.arch.plt.max_entries = num_plts;
+
     Ok(())
+}
+
+fn count_plts(rela_sec: &RelocSection) -> usize {
+    rela_sec
+        .iter()
+        .filter(|rela| {
+            matches!(
+                Arm64RelTy::try_from(rela.r_type),
+                Ok(Arm64RelTy::R_AARCH64_CALL26 | Arm64RelTy::R_AARCH64_JUMP26)
+            )
+        })
+        .count()
 }
